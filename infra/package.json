@@ -1,0 +1,23 @@
+{
+  "name": "smart-report-infra",
+  "version": "1.0.0",
+  "bin": {
+    "app": "bin/app.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all",
+    "synth": "cdk synth"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "aws-cdk": "^2.170.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.4.0"
+  }
+}

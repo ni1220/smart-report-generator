@@ -1,0 +1,9 @@
+infra
+node_modules
+.venv
+tests
+.git
+cdk.out
+*.tar.gz
+__pycache__
+.DS_Store

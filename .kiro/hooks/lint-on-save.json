@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Lint Python on Save",
+      "trigger": "PostFileSave",
+      "matcher": "\\.(py)$",
+      "action": {
+        "type": "command",
+        "command": "cd /Users/nizicheng/Desktop/kiro/smart-report-generator && python -m py_compile"
+      }
+    }
+  ]
+}

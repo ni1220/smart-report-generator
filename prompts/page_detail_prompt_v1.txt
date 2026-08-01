@@ -1,0 +1,45 @@
+你正在製作一份 16 頁策略分析簡報的第 {page_number} 頁。
+
+## 簡報主題
+{outline_title}
+
+## 此頁聚焦主題
+{focus_topic}
+
+## 建議圖表類型
+{chart_type}
+
+## 數據來源指引
+{data_source}
+
+## 完整數據
+{data_json}
+
+## 輸出要求
+
+請為此頁生成完整的 SlideContent，包含：
+
+1. **title**: 精煉有力的頁面標題（15 字以內）
+2. **subtitle**: 補充說明（可選）
+3. **bullet_points**: 3-5 個關鍵洞察
+   - 每個 30-50 字
+   - 必須包含具體數字
+   - 必須分析「為什麼」而非只說「是什麼」
+   - 範例好的寫法：「國泰世華簽帳金額年增 12%，推測與 CUBE 卡生態圈綁定外送/串流服務策略奏效有關」
+   - 範例差的寫法：「國泰世華簽帳金額年增 12%」
+4. **chart**: 如有圖表需求，提供完整的 ChartSpec
+   - categories: 圖表 X 軸標籤（如銀行名稱）
+   - data_series: 完整數據系列，values 必須從提供的數據計算得出
+   - 確保數據準確，直接從上方「完整數據」中提取
+5. **insight_driver**: 此頁洞察的核心驅動因素解釋（50-100 字）
+6. **layout_type**: 根據內容選擇最適版面
+   - "content_with_chart": 左文右圖（最常用）
+   - "full_chart": 全頁圖表（數據密集頁）
+   - "content_only": 純文字（策略建議頁）
+   - "title_slide": 封面
+   - "two_column": 雙欄對比
+
+## 重要提醒
+- 數據必須準確，從提供的資料中計算
+- 圖表的 categories 和 data_series.values 長度必須一致
+- 不要捏造不存在的數據

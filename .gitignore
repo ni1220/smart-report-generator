@@ -1,0 +1,41 @@
+# 環境變數與機密（必須排除）
+.env
+.env.local
+.env.production
+*.pem
+credentials.json
+
+# AWS 相關機密
+.aws/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Node (CDK)
+node_modules/
+cdk.out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 產出檔案
+output/*.pptx
+output/*.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# === 重要 ===
+# .kiro/ 絕對不能加入 .gitignore！
+# 競賽規範要求必須保留以展示 Kiro 使用情況

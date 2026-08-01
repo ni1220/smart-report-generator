@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Run Tests After Task Completion",
+      "trigger": "PostTaskExec",
+      "action": {
+        "type": "command",
+        "command": "cd /Users/nizicheng/Desktop/kiro/smart-report-generator && python -m pytest tests/unit -v --tb=short 2>&1 | tail -20"
+      }
+    }
+  ]
+}

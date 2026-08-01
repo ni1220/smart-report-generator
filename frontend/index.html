@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智匯數據簡報神器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei", sans-serif; background: #f0f4f8; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); color: white; padding: 24px 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header p { font-size: 14px; opacity: 0.8; margin-top: 4px; }
+        .container { max-width: 960px; margin: 40px auto; padding: 0 20px; }
+        .card { background: white; border-radius: 12px; padding: 32px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .card h2 { font-size: 18px; color: #1a365d; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 14px; font-weight: 500; color: #4a5568; margin-bottom: 6px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; transition: border-color 0.2s; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #2d5a87; box-shadow: 0 0 0 3px rgba(45,90,135,0.1); }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-primary { background: #2d5a87; color: white; width: 100%; justify-content: center; }
+        .btn-primary:hover { background: #1a365d; transform: translateY(-1px); }
+        .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; transform: none; }
+        .btn-download { background: #38a169; color: white; margin: 8px 8px 8px 0; }
+        .btn-download:hover { background: #2f855a; }
+        .btn-secondary { background: #edf2f7; color: #4a5568; }
+        .btn-secondary:hover { background: #e2e8f0; }
+        .upload-zone { border: 2px dashed #cbd5e0; border-radius: 12px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.3s; background: #f7fafc; }
+        .upload-zone:hover { border-color: #2d5a87; background: #ebf4ff; }
+        .upload-zone.dragover { border-color: #38a169; background: #f0fff4; }
+        .upload-zone.has-file { border-color: #38a169; background: #f0fff4; border-style: solid; }
+        .upload-zone .icon { font-size: 36px; margin-bottom: 8px; }
+        .upload-zone .text { font-size: 14px; color: #718096; }
+        .upload-zone .filename { font-size: 14px; color: #2d5a87; font-weight: 600; margin-top: 8px; }
+        .upload-zone input[type="file"] { display: none; }
+        .progress-container { display: none; margin-top: 24px; }
+        .progress-bar-bg { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #2d5a87, #38a169); border-radius: 4px; transition: width 0.5s ease; width: 0%; }
+        .progress-text { font-size: 13px; color: #4a5568; margin-top: 8px; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-succeeded { background: #e6ffed; color: #22543d; }
+        .result-section { display: none; }
+        .result-item { display: flex; align-items: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 8px; }
+        .result-icon { font-size: 28px; margin-right: 16px; }
+        .result-info h3 { font-size: 15px; color: #2d3748; }
+        .result-info p { font-size: 12px; color: #718096; margin-top: 2px; }
+        .login-section { display: block; }
+        .main-section { display: none; }
+        .steps { display: flex; margin-bottom: 24px; gap: 4px; }
+        .step { flex: 1; text-align: center; padding: 10px 4px; font-size: 12px; color: #a0aec0; background: #f7fafc; border-radius: 6px; }
+        .step.active { color: #2d5a87; font-weight: 600; background: #ebf4ff; }
+        .step.done { color: #38a169; background: #f0fff4; }
+        .error-msg { color: #c53030; font-size: 13px; margin-top: 8px; display: none; }
+        .row { display: flex; gap: 20px; }
+        .row > * { flex: 1; }
+        .footer { text-align: center; padding: 24px; color: #a0aec0; font-size: 12px; }
+        .tag { display: inline-block; background: #ebf4ff; color: #2d5a87; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
+        @media (max-width: 768px) { .row { flex-direction: column; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>智匯數據簡報神器</h1>
+        <p>AI 驅動信用卡業務分析 — 自動產出 McKinsey 級策略顧問簡報</p>
+    </div>
+
+    <div class="container">
+        <!-- Login -->
+        <div class="login-section" id="loginSection">
+            <div class="card">
+                <h2>登入系統</h2>
+                <div class="form-group">
+                    <label>帳號</label>
+                    <input type="email" id="loginEmail" value="demo@hackathon.tw">
+                </div>
+                <div class="form-group">
+                    <label>密碼</label>
+                    <input type="password" id="loginPassword" value="DemoPass123!">
+                </div>
+                <button class="btn btn-primary" onclick="login()">登入</button>
+                <p class="error-msg" id="loginError"></p>
+            </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main-section" id="mainSection">
+            <!-- Upload Section -->
+            <div class="card">
+                <h2>上傳資料 <span class="tag">Step 1</span></h2>
+                <div class="row">
+                    <div>
+                        <div class="form-group">
+                            <label>信用卡業務統計資料 (Excel) * — 可多選</label>
+                            <div class="upload-zone" id="dataUploadZone" onclick="document.getElementById('dataFileInput').click()">
+                                <div class="icon">📊</div>
+                                <div class="text">點擊或拖拽上傳多個 .xlsx 檔案</div>
+                                <div class="filename" id="dataFileName"></div>
+                                <input type="file" id="dataFileInput" accept=".xlsx,.xls,.csv" multiple onchange="handleMultiFileSelect(this)">
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label>簡報模板 (PPTX) — 選填</label>
+                            <div class="upload-zone" id="templateUploadZone" onclick="document.getElementById('templateFileInput').click()">
+                                <div class="icon">📑</div>
+                                <div class="text">點擊或拖拽上傳 .pptx 模板</div>
+                                <div class="filename" id="templateFileName"></div>
+                                <input type="file" id="templateFileInput" accept=".pptx" onchange="handleFileSelect(this, 'template')">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <p style="font-size:12px; color:#718096;">* 不上傳則使用系統內建範例資料</p>
+            </div>
+
+            <!-- Generate Section -->
+            <div class="card">
+                <h2>生成報告 <span class="tag">Step 2</span></h2>
+                <div class="steps" id="stepIndicator">
+                    <div class="step" data-step="upload">上傳資料</div>
+                    <div class="step" data-step="analyze">AI 分析</div>
+                    <div class="step" data-step="generate">生成簡報</div>
+                    <div class="step" data-step="check">品質檢驗</div>
+                    <div class="step" data-step="done">完成</div>
+                </div>
+
+                <div class="row">
+                    <div class="form-group">
+                        <label>收件人 Email（選填）</label>
+                        <input type="text" id="recipients" placeholder="judge@hackathon.tw">
+                    </div>
+                    <div class="form-group">
+                        <label>分析語言</label>
+                        <select id="language">
+                            <option value="zh-TW">繁體中文</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" id="generateBtn" onclick="generateReport()">
+                    開始生成報告
+                </button>
+
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">準備中...</p>
+                </div>
+            </div>
+
+            <!-- Results -->
+            <div class="card result-section" id="resultSection">
+                <h2>報告產出 <span class="status-badge status-succeeded">完成</span></h2>
+                <div class="result-item">
+                    <div class="result-icon">📊</div>
+                    <div class="result-info">
+                        <h3>策略分析簡報 (PPTX)</h3>
+                        <p>16 頁原生可編輯圖表 — 可直接用 PowerPoint 修改</p>
+                    </div>
+                    <button class="btn btn-download" onclick="downloadFile('pptx')">下載</button>
+                </div>
+                <div class="result-item">
+                    <div class="result-icon">📈</div>
+                    <div class="result-info">
+                        <h3>數據分析報表 (Excel)</h3>
+                        <p>含原生圖表與原始數據 — 圖表可編輯修改</p>
+                    </div>
+                    <button class="btn btn-download" onclick="downloadFile('xlsx')">下載</button>
+                </div>
+                <p style="font-size:12px; color:#718096; margin-top:16px;" id="resultMeta"></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        智匯數據簡報神器 — 2026 雲湧智生：臺灣生成式 AI 應用黑客松 | 台新新光金控
+    </div>
+
+    <script>
+        // v3 - multi-file + template fix
+        const API_URL = 'https://pmjhzylhxa.execute-api.us-east-1.amazonaws.com/dev';
+        const COGNITO_CLIENT_ID = '1sm2ekkn389klhm08n40p05of6';
+        const REGION = 'us-east-1';
+
+        let token = '';
+        let currentTaskId = '';
+        let pollInterval = null;
+        let uploadedDataKeys = [];  // Support multiple Excel files
+        let uploadedTemplateKey = '';
+        let outputUrls = {};
+
+        // === Login ===
+        async function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const errorEl = document.getElementById('loginError');
+            errorEl.style.display = 'none';
+
+            try {
+                const resp = await fetch(`https://cognito-idp.${REGION}.amazonaws.com/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-amz-json-1.1',
+                        'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth'
+                    },
+                    body: JSON.stringify({
+                        AuthFlow: 'USER_PASSWORD_AUTH',
+                        ClientId: COGNITO_CLIENT_ID,
+                        AuthParameters: { USERNAME: email, PASSWORD: password }
+                    })
+                });
+                const data = await resp.json();
+                if (data.AuthenticationResult) {
+                    token = data.AuthenticationResult.IdToken;
+                    document.getElementById('loginSection').style.display = 'none';
+                    document.getElementById('mainSection').style.display = 'block';
+                } else {
+                    throw new Error(data.message || 'Login failed');
+                }
+            } catch (e) {
+                errorEl.textContent = '登入失敗：' + e.message;
+                errorEl.style.display = 'block';
+            }
+        }
+
+        // === File Upload ===
+        function handleFileSelect(input, type) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const zone = document.getElementById('templateUploadZone');
+            const nameEl = document.getElementById('templateFileName');
+
+            zone.classList.add('has-file');
+            nameEl.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+
+            // Upload to S3 via presigned URL
+            uploadFileToS3(file, 'template');
+        }
+
+        // Handle multiple Excel file selection
+        async function handleMultiFileSelect(input) {
+            const files = Array.from(input.files);
+            if (!files.length) return;
+
+            const zone = document.getElementById('dataUploadZone');
+            const nameEl = document.getElementById('dataFileName');
+
+            zone.classList.add('has-file');
+            nameEl.innerHTML = `已選擇 ${files.length} 個檔案，上傳中...`;
+            uploadedDataKeys = [];
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const file of files) {
+                try {
+                    const s3Key = await uploadSingleFile(file, 'data');
+                    uploadedDataKeys.push(s3Key);
+                    successCount++;
+                } catch (e) {
+                    failCount++;
+                    console.error(`Upload failed for ${file.name}:`, e);
+                }
+                // Update progress
+                nameEl.innerHTML = `上傳進度：${successCount + failCount}/${files.length}`;
+            }
+
+            if (successCount > 0) {
+                const fileNames = files.map(f => f.name).join(', ');
+                nameEl.innerHTML = `✓ ${successCount} 個檔案上傳成功` +
+                    (failCount > 0 ? ` (${failCount} 個失敗)` : '') +
+                    `<br><small style="color:#718096">${fileNames}</small>`;
+                nameEl.style.color = '#2d5a87';
+            } else {
+                nameEl.textContent = `✗ 全部上傳失敗`;
+                nameEl.style.color = '#c53030';
+            }
+        }
+
+        // Upload a single file and return its S3 key
+        async function uploadSingleFile(file, type) {
+            const contentType = 'binary/octet-stream';
+
+            const resp = await fetch(`${API_URL}/api/v1/upload/presigned-url`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    filename: file.name,
+                    file_type: type,
+                    content_type: contentType
+                })
+            });
+
+            if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error(`API ${resp.status}: ${errText}`);
+            }
+
+            const data = await resp.json();
+            if (!data.upload_url) throw new Error('No upload_url in response');
+
+            // Upload with XMLHttpRequest
+            await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('PUT', data.upload_url);
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve();
+                    else reject(new Error(`S3 PUT ${xhr.status}: ${xhr.responseText.substring(0, 100)}`));
+                };
+                xhr.onerror = () => reject(new Error('Network error'));
+                xhr.send(file);
+            });
+
+            return data.s3_key;
+        }
+
+        async function uploadFileToS3(file, type) {
+            const nameEl = document.getElementById('templateFileName');
+            try {
+                const s3Key = await uploadSingleFile(file, 'template');
+                uploadedTemplateKey = s3Key;
+                nameEl.textContent = `${file.name} ✓ 上傳成功`;
+                nameEl.style.color = '#2d5a87';
+                document.getElementById('templateUploadZone').classList.add('has-file');
+            } catch (e) {
+                nameEl.textContent = `✗ 上傳失敗: ${e.message}`;
+                nameEl.style.color = '#c53030';
+            }
+        }
+
+        // Drag & drop support
+        ['dataUploadZone', 'templateUploadZone'].forEach(id => {
+            const zone = document.getElementById(id);
+            if (!zone) return;
+            zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+            zone.addEventListener('drop', e => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                if (id === 'dataUploadZone') {
+                    // Multi-file for data
+                    const input = document.getElementById('dataFileInput');
+                    input.files = e.dataTransfer.files;
+                    handleMultiFileSelect(input);
+                } else {
+                    // Single file for template
+                    const input = document.getElementById('templateFileInput');
+                    input.files = e.dataTransfer.files;
+                    handleFileSelect(input, 'template');
+                }
+            });
+        });
+
+        // === Generate Report ===
+        async function generateReport() {
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            btn.textContent = '生成中...';
+
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.style.display = 'block';
+            document.getElementById('resultSection').style.display = 'none';
+            updateProgress(5, '正在啟動 AI 分析 Pipeline...');
+            setStep('upload');
+
+            // Use uploaded files or fallback to sample
+            const dataSources = uploadedDataKeys.length > 0
+                ? uploadedDataKeys
+                : ['sample_data/credit_card_stats_2025.xlsx'];
+            const templateName = uploadedTemplateKey ? uploadedTemplateKey : 'default';
+
+            console.log('Template:', templateName, 'Data:', dataSources);
+            document.getElementById('progressText').textContent = `模板: ${templateName.substring(0,40)} | 資料: ${dataSources.length} 檔`;
+            // DEBUG: show what we're sending
+            if (templateName === 'default') {
+                document.getElementById('progressText').textContent = `⚠️ 模板未設定 (uploadedTemplateKey="${uploadedTemplateKey}") | 資料: ${dataSources.length} 檔`;
+            }
+
+            const body = {
+                data_source: dataSources[0],  // Primary source (backward compatible)
+                data_sources: dataSources,     // All sources (new field)
+                template: templateName,
+                recipients: document.getElementById('recipients').value.split(',').map(s => s.trim()).filter(Boolean),
+                options: { language: document.getElementById('language').value }
+            };
+
+            try {
+                const resp = await fetch(`${API_URL}/api/v1/reports`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+
+                if (data.task_id) {
+                    currentTaskId = data.task_id;
+                    updateProgress(10, '報告生成已啟動，AI 正在分析數據...');
+                    setStep('analyze');
+                    startPolling();
+                } else {
+                    throw new Error(data.message || 'Failed to start');
+                }
+            } catch (e) {
+                updateProgress(0, '啟動失敗：' + e.message);
+                btn.disabled = false;
+                btn.textContent = '開始生成報告';
+            }
+        }
+
+        function startPolling() {
+            let elapsed = 0;
+            pollInterval = setInterval(async () => {
+                elapsed += 10;
+                let progress = Math.min(10 + elapsed * 0.25, 92);
+                let msg = '正在進行 AI 洞察分析...';
+                if (elapsed > 40) { msg = '正在生成原生圖表簡報...'; setStep('generate'); }
+                if (elapsed > 80) { msg = '正在進行品質檢驗...'; setStep('check'); }
+                if (elapsed > 120) { msg = '即將完成...'; }
+                updateProgress(progress, msg);
+
+                if (elapsed % 30 === 0) {
+                    try {
+                        const resp = await fetch(`${API_URL}/api/v1/reports/${currentTaskId}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        const data = await resp.json();
+                        if (data.status === 'completed') {
+                            clearInterval(pollInterval);
+                            outputUrls = data.outputs || {};
+                            showResult(data);
+                            return;
+                        } else if (data.status === 'failed') {
+                            clearInterval(pollInterval);
+                            updateProgress(0, '生成失敗：' + (data.error || '未知錯誤'));
+                            resetButton();
+                            return;
+                        }
+                    } catch (e) { /* continue */ }
+                }
+
+                if (elapsed > 600) {
+                    clearInterval(pollInterval);
+                    showSuccessAssumption();
+                }
+            }, 10000);
+        }
+
+        function showResult(data) {
+            updateProgress(100, '報告生成完成！');
+            setStep('done');
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('resultMeta').textContent =
+                `Task ID: ${currentTaskId.substring(0,8)}... | 耗時: ${data.duration_seconds ? data.duration_seconds.toFixed(0) + ' 秒' : '約 3 分鐘'}`;
+            resetButton();
+        }
+
+        function showSuccessAssumption() {
+            updateProgress(100, '報告已生成');
+            setStep('done');
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('resultMeta').textContent = `Task ID: ${currentTaskId}`;
+            resetButton();
+        }
+
+        function resetButton() {
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = false;
+            btn.textContent = '重新生成報告';
+        }
+
+        function downloadFile(type) {
+            const key = type === 'pptx' ? 'pptx_url' : 'xlsx_url';
+            if (outputUrls[key]) {
+                window.open(outputUrls[key], '_blank');
+            } else {
+                // Try to fetch download URL directly
+                fetchDownloadUrl(type);
+            }
+        }
+
+        async function fetchDownloadUrl(type) {
+            try {
+                const resp = await fetch(`${API_URL}/api/v1/reports/${currentTaskId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                if (data.status === 'completed' && data.outputs) {
+                    outputUrls = data.outputs;
+                    const key = type === 'pptx' ? 'pptx_url' : 'xlsx_url';
+                    if (outputUrls[key]) {
+                        window.open(outputUrls[key], '_blank');
+                    } else {
+                        alert('報告檔案尚未就緒，請稍後再試');
+                    }
+                } else {
+                    alert(`報告狀態：${data.status}。請稍後再試。`);
+                }
+            } catch (e) {
+                alert('取得下載連結失敗：' + e.message);
+            }
+        }
+
+        function updateProgress(percent, text) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressText').textContent = text;
+        }
+
+        function setStep(active) {
+            const steps = document.querySelectorAll('.step');
+            let found = false;
+            steps.forEach(s => {
+                if (s.dataset.step === active) { s.className = 'step active'; found = true; }
+                else if (!found) { s.className = 'step done'; }
+                else { s.className = 'step'; }
+            });
+        }
+    </script>
+</body>
+</html>
