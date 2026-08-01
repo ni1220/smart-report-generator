@@ -363,7 +363,12 @@ class PptxGenerator:
 
     def _add_text_box(self, slide, text, left, top, width, height,
                       font_size=Pt(12), bold=False, italic=False):
-        """Add text box with proper formatting."""
+        """Add text box with proper formatting and overflow protection."""
+        # Truncate text to prevent overflow (estimate based on area)
+        max_chars = int((width / Inches(1)) * (height / Inches(1)) * 25)
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
+
         tb = slide.shapes.add_textbox(left, top, width, height)
         tf = tb.text_frame
         tf.word_wrap = True
