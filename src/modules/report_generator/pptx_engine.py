@@ -169,9 +169,13 @@ class PptxGenerator:
 
         notes_text = "\n\n".join(notes_parts)
 
-        # Add notes to slide
-        notes_slide = slide.notes_slide
-        notes_slide.notes_text_frame.text = notes_text
+        # Add notes to slide (with error handling for compatibility)
+        try:
+            notes_slide = slide.notes_slide
+            tf = notes_slide.notes_text_frame
+            tf.text = notes_text
+        except Exception as e:
+            logger.warning(f"Failed to add speaker notes to page {content.page_number}: {e}")
 
     # === Slide Type Methods ===
 

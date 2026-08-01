@@ -24,6 +24,7 @@ class ExcelGenerator:
 
     def generate(self) -> bytes:
         self._create_summary_sheet()
+        self._create_ai_analysis_sheet()
         for slide in self._plan.slides:
             if slide.chart and slide.chart.categories and slide.chart.data_series:
                 try:
@@ -34,6 +35,58 @@ class ExcelGenerator:
         self._wb.save(buffer)
         buffer.seek(0)
         return buffer.read()
+
+    def _create_ai_analysis_sheet(self):
+        """Create a sheet with AI analysis reasoning for each slide."""
+        ws = self._wb.create_sheet("AI 分析思路")
+
+        # Header
+        headers = ["頁碼", "標題", "版面類型", "AI 驅動因素分析", "關鍵要點", "圖表說明"]
+        header_font = Font(size=11, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="C0392B", end_color="C0392B", fill_type="solid")
+
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Data rows
+        for i, slide in enumerate(self._plan.slides, 2):
+            ws.cell(row=i, column=1, value=slide.page_number)
+            ws.cell(row=i, column=2, value=slide.title)
+            ws.cell(row=i, column=3, value=slide.layout_type)
+            ws.cell(row=i, column=4, value=slide.insight_driver or "—")
+
+            # Bullet points as combined text
+            if slide.bullet_points:
+                bullets = "\n".join(f"• {bp}" for bp in slide.bullet_points)
+                ws.cell(row=i, column=5, value=bullets)
+            else:
+                ws.cell(row=i, column=5, value="—")
+
+            # Chart info
+            if slide.chart:
+                chart_info = f"{slide.chart.chart_type}: {slide.chart.title}"
+                if slide.chart.categories:
+                    chart_info += f"\n維度: {', '.join(slide.chart.categories[:5])}"
+                ws.cell(row=i, column=6, value=chart_info)
+            else:
+                ws.cell(row=i, column=6, value="—")
+
+            # Wrap text for readability
+            for col in range(1, 7):
+                ws.cell(row=i, column=col).alignment = Alignment(wrap_text=True, vertical="top")
+
+        # Column widths
+        ws.column_dimensions['A'].width = 6
+        ws.column_dimensions['B'].width = 25
+        ws.column_dimensions['C'].width = 15
+        ws.column_dimensions['D'].width = 45
+        ws.column_dimensions['E'].width = 50
+        ws.column_dimensions['F'].width = 30
+
+        logger.info("Created AI analysis sheet")
 
     def _create_summary_sheet(self):
         ws = self._wb.create_sheet("執行摘要")
