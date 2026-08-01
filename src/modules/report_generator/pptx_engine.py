@@ -358,7 +358,7 @@ class PptxGenerator:
     # === Utilities ===
 
     def _set_slide_title(self, slide, title: str):
-        """Set title, and hide empty content placeholders to avoid text overlap."""
+        """Set title and clear empty placeholders to avoid overlap."""
         # Use the existing title placeholder
         if slide.shapes.title:
             slide.shapes.title.text = title
@@ -370,19 +370,17 @@ class PptxGenerator:
                                LEFT_MARGIN, TITLE_TOP,
                                FULL_CONTENT_WIDTH, TITLE_HEIGHT, Pt(22), bold=True)
 
-        # Hide empty body/content placeholders (don't remove - that breaks background)
-        # Just clear their text and move them off-screen
-        for shape in list(slide.shapes):
-            if not shape.has_text_frame:
-                continue
+        # Clear empty placeholders (set text to empty, make font tiny/transparent)
+        for shape in list(slide.placeholders):
             if shape == slide.shapes.title:
                 continue
-            # Check if it's an empty placeholder with default text
-            tf_text = shape.text_frame.text.strip()
-            if tf_text == "" or "按一下" in tf_text or "Click to" in tf_text.lower() or "新增" in tf_text:
-                # Move off-screen instead of deleting (preserves template background)
-                shape.left = Inches(20)
-                shape.top = Inches(20)
+            tf_text = shape.text_frame.text.strip() if shape.has_text_frame else ""
+            if tf_text == "" or "按一下" in tf_text or "Click" in tf_text or "新增" in tf_text:
+                # Clear the placeholder text completely
+                shape.text_frame.clear()
+                # Make it minimal size so it doesn't interfere
+                shape.width = Inches(0.1)
+                shape.height = Inches(0.1)
 
     def _add_text_box(self, slide, text, left, top, width, height,
                       font_size=Pt(12), bold=False, italic=False):
