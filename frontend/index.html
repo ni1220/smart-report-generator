@@ -114,6 +114,21 @@
                 <p style="font-size:12px; color:#718096;">* 不上傳則使用系統內建範例資料</p>
             </div>
 
+            <!-- Custom Prompt Section -->
+            <div class="card">
+                <h2>分析指引 <span class="tag">選填</span></h2>
+                <div class="form-group">
+                    <label>你希望 AI 如何分析這份資料？（留空則自動偵測資料類型並產出策略分析）</label>
+                    <textarea id="customPrompt" rows="4" placeholder="例如：&#10;• 分析各銀行的市佔率變化趨勢，找出成長最快的前5名&#10;• 比較各產品線的毛利率，提出庫存優化建議&#10;• 從人力資源角度分析離職率與部門的關聯" style="width:100%; padding:10px 14px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px; resize:vertical; font-family:inherit;"></textarea>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn btn-secondary" style="font-size:12px; padding:6px 12px;" onclick="setPromptExample('market')">📊 市場競爭分析</button>
+                    <button class="btn btn-secondary" style="font-size:12px; padding:6px 12px;" onclick="setPromptExample('revenue')">💰 營收成長分析</button>
+                    <button class="btn btn-secondary" style="font-size:12px; padding:6px 12px;" onclick="setPromptExample('risk')">⚠️ 風險評估</button>
+                    <button class="btn btn-secondary" style="font-size:12px; padding:6px 12px;" onclick="setPromptExample('strategy')">🎯 策略建議</button>
+                </div>
+            </div>
+
             <!-- Generate Section -->
             <div class="card">
                 <h2>生成報告 <span class="tag">Step 2</span></h2>
@@ -388,7 +403,10 @@
                 data_sources: dataSources,     // All sources (new field)
                 template: templateName,
                 recipients: document.getElementById('recipients').value.split(',').map(s => s.trim()).filter(Boolean),
-                options: { language: document.getElementById('language').value }
+                options: {
+                    language: document.getElementById('language').value,
+                    custom_prompt: document.getElementById('customPrompt').value.trim() || ''
+                }
             };
 
             try {
@@ -523,6 +541,17 @@
                 else if (!found) { s.className = 'step done'; }
                 else { s.className = 'step'; }
             });
+        }
+
+        // === Prompt Examples ===
+        function setPromptExample(type) {
+            const prompts = {
+                market: '以策略顧問角度分析各競爭者的市場份額變化、成長動能與定位策略。找出市場領導者與挑戰者，分析其核心競爭優勢與潛在威脅。',
+                revenue: '深度分析營收結構與成長趨勢。拆解各業務線/產品/區域的營收貢獻，找出成長引擎與衰退警訊，提出營收優化策略建議。',
+                risk: '從風險管理角度分析數據中的異常指標與潛在風險。評估信用風險、市場風險與操作風險，提出風險緩解方案與預警機制建議。',
+                strategy: '綜合分析數據並提出 3-5 項具體可行的策略行動方案。每項建議需包含預期效益、實施優先級與所需資源估算。'
+            };
+            document.getElementById('customPrompt').value = prompts[type] || '';
         }
     </script>
 </body>

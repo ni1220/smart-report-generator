@@ -31,6 +31,7 @@ class ReportOptions(BaseModel):
     include_executive_summary: bool = True
     chart_style: str = "professional"
     language: str = "zh-TW"
+    custom_prompt: str = ""
 
 
 class CreateReportRequest(BaseModel):

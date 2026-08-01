@@ -40,7 +40,7 @@ SYSTEM_PROMPT = """你是一位頂尖的金融策略顧問，曾任職於 McKins
 5. 輸出必須嚴格遵守指定的 JSON 格式
 """
 
-OUTLINE_PROMPT_TEMPLATE = """基於以下信用卡業務統計數據，規劃一份 16 頁策略分析簡報的大綱。
+OUTLINE_PROMPT_TEMPLATE = """基於以下業務統計數據，規劃一份 16 頁策略分析簡報的大綱。
 
 數據摘要：
 {data_summary}
@@ -106,8 +106,38 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     task_id = event["task_id"]
     parsed_data_key = event["parsed_data_key"]
+    options = event.get("options", {})
+    custom_prompt = options.get("custom_prompt", "")
 
     logger.info(f"[{task_id}] Starting AI insight generation")
+    if custom_prompt:
+        logger.info(f"[{task_id}] Using custom prompt: {custom_prompt[:80]}...")
+
+    # Build effective system prompt
+    if custom_prompt:
+        effective_system_prompt = f"""你是一位頂尖的商業策略顧問，專精數據分析與策略建議。
+
+## 用戶的分析指引
+{custom_prompt}
+
+## 輸出要求
+1. 每個洞察必須引用具體數字
+2. 分析「為什麼」而非只陳述「是什麼」
+3. 提出具體可行的策略建議
+
+## 語言風格
+- 繁體中文
+- 專業但不生硬
+- Bullet points 嚴格控制在 25-35 字
+- 標題不超過 15 字
+- 圖表 categories 不超過 8 個
+
+## 格式規範
+- 嚴格遵循指定的 JSON Schema 輸出
+- 所有數值保留至小數點後 2 位
+"""
+    else:
+        effective_system_prompt = SYSTEM_PROMPT
 
     try:
         # Load parsed data
@@ -127,7 +157,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         outline_prompt = OUTLINE_PROMPT_TEMPLATE.format(data_summary=data_summary)
 
         outline = bedrock.converse_structured(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=effective_system_prompt,
             user_message=outline_prompt,
             output_model=PresentationOutline,
             max_tokens=4096,
@@ -164,7 +194,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
 
             slide_content = bedrock.converse_structured(
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=effective_system_prompt,
                 user_message=page_prompt,
                 output_model=SlideContent,
                 max_tokens=4096,
@@ -189,7 +219,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         review_prompt = REVIEW_PROMPT_TEMPLATE.format(slides_json=slides_json[:12000])
 
         review = bedrock.converse_structured(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=effective_system_prompt,
             user_message=review_prompt,
             output_model=ConsistencyReview,
             max_tokens=2048,
