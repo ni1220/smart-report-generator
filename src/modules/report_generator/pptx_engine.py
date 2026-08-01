@@ -307,12 +307,16 @@ class PptxGenerator:
             cf = slide.shapes.add_chart(ct, left, top, width, height, cd)
             ch = cf.chart
 
-            # Legend: show if multiple series, position at bottom to save space
-            ch.has_legend = len(chart_spec.data_series) > 1
-            if ch.has_legend:
+            # Legend: always show for pie charts, show for multiple series otherwise
+            is_pie = chart_spec.chart_type == "pie"
+            if is_pie or len(chart_spec.data_series) > 1:
+                ch.has_legend = True
                 from pptx.enum.chart import XL_LEGEND_POSITION
                 ch.legend.position = XL_LEGEND_POSITION.BOTTOM
                 ch.legend.include_in_layout = False
+                ch.legend.font.size = Pt(8)
+            else:
+                ch.has_legend = False
 
             # Chart title: concise
             if chart_spec.title:
@@ -321,15 +325,16 @@ class PptxGenerator:
                 ch.chart_title.text_frame.paragraphs[0].font.size = Pt(9)
                 ch.chart_title.text_frame.paragraphs[0].font.bold = True
 
-            # Improve axis readability
-            try:
-                if hasattr(ch, 'category_axis'):
-                    ch.category_axis.tick_labels.font.size = Pt(8)
-                if hasattr(ch, 'value_axis'):
-                    ch.value_axis.tick_labels.font.size = Pt(8)
-                    ch.value_axis.has_major_gridlines = True
-            except Exception:
-                pass
+            # Improve axis readability (not applicable for pie)
+            if not is_pie:
+                try:
+                    if hasattr(ch, 'category_axis'):
+                        ch.category_axis.tick_labels.font.size = Pt(8)
+                    if hasattr(ch, 'value_axis'):
+                        ch.value_axis.tick_labels.font.size = Pt(8)
+                        ch.value_axis.has_major_gridlines = True
+                except Exception:
+                    pass
 
             logger.info(f"Chart added: '{chart_spec.title}' ({chart_spec.chart_type})")
         except Exception as e:
@@ -353,10 +358,10 @@ class PptxGenerator:
     # === Utilities ===
 
     def _set_slide_title(self, slide, title: str):
-        """Set title in the safe title area."""
+        """Set title in the safe title area, clearing any conflicting placeholders."""
+        # First, try to use the existing title placeholder
         if slide.shapes.title:
             slide.shapes.title.text = title
-            # Ensure title font is readable
             for para in slide.shapes.title.text_frame.paragraphs:
                 para.font.size = Pt(22)
                 para.font.bold = True
@@ -364,6 +369,19 @@ class PptxGenerator:
             self._add_text_box(slide, title,
                                LEFT_MARGIN, TITLE_TOP,
                                FULL_CONTENT_WIDTH, TITLE_HEIGHT, Pt(22), bold=True)
+
+        # Remove empty body placeholders to prevent "按一下以新增文字" overlap
+        from pptx.shapes.placeholder import _InheritsDimensions
+        shapes_to_skip = []
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape != slide.shapes.title:
+                if shape.text_frame.text == "" or "按一下" in shape.text_frame.text or "Click to" in shape.text_frame.text.lower():
+                    shapes_to_skip.append(shape)
+
+        # Remove empty placeholders by making them invisible
+        for shape in shapes_to_skip:
+            sp = shape._element
+            sp.getparent().remove(sp)
 
     def _add_text_box(self, slide, text, left, top, width, height,
                       font_size=Pt(12), bold=False, italic=False):
