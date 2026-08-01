@@ -9,6 +9,7 @@ Optimized for TS Holdings template:
 """
 
 import logging
+import copy
 from io import BytesIO
 
 from pptx import Presentation
@@ -16,6 +17,8 @@ from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.util import Inches, Pt, Cm
 from pptx.dml.color import RGBColor
+from pptx.oxml.ns import qn
+from lxml import etree
 
 from src.modules.ai_insight.models import PresentationPlan, SlideContent, ChartSpec
 
@@ -151,7 +154,7 @@ class PptxGenerator:
             self._add_content_only_slide(content)
 
     def _add_speaker_notes(self, slide, content: SlideContent):
-        """Add AI analysis reasoning to speaker notes."""
+        """Add AI analysis reasoning to speaker notes using robust XML approach."""
         notes_parts = []
 
         if content.insight_driver:
@@ -169,13 +172,120 @@ class PptxGenerator:
 
         notes_text = "\n\n".join(notes_parts)
 
-        # Add notes to slide (with error handling for compatibility)
+        # Method 1: Standard python-pptx approach
         try:
             notes_slide = slide.notes_slide
             tf = notes_slide.notes_text_frame
-            tf.text = notes_text
+            # Clear existing paragraphs first
+            tf.clear()
+            # Write line by line as separate paragraphs for better formatting
+            lines = notes_text.split("\n")
+            for i, line in enumerate(lines):
+                if i == 0:
+                    tf.paragraphs[0].text = line
+                else:
+                    p = tf.add_paragraph()
+                    p.text = line
+            logger.info(f"Speaker notes added to page {content.page_number} (standard method)")
+            return
         except Exception as e:
-            logger.warning(f"Failed to add speaker notes to page {content.page_number}: {e}")
+            logger.warning(f"Standard notes method failed for page {content.page_number}: {e}")
+
+        # Method 2: Direct XML manipulation fallback
+        try:
+            self._add_notes_via_xml(slide, notes_text, content.page_number)
+            logger.info(f"Speaker notes added to page {content.page_number} (XML fallback)")
+            return
+        except Exception as e:
+            logger.error(f"XML notes fallback also failed for page {content.page_number}: {e}")
+
+    def _add_notes_via_xml(self, slide, notes_text: str, page_number: int):
+        """Add speaker notes by directly manipulating the slide's XML structure."""
+        from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+        from pptx.slide import NotesSlide
+
+        # Check if notes slide already exists
+        try:
+            notes_slide = slide.notes_slide
+        except Exception:
+            # If notes_slide property fails, create one manually
+            notes_slide = self._create_notes_slide_manual(slide)
+
+        if notes_slide is None:
+            logger.warning(f"Cannot create notes slide for page {page_number}")
+            return
+
+        # Find the notes text frame body element
+        # Notes slide has a shape with type "body" (idx=1) for the text
+        sp_tree = notes_slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
+
+        # Find the body placeholder (usually ph type="body" or idx="1")
+        body_sp = None
+        for sp in sp_tree.findall(qn('p:sp')):
+            nvSpPr = sp.find(qn('p:nvSpPr'))
+            if nvSpPr is not None:
+                nvPr = nvSpPr.find(qn('p:nvPr'))
+                if nvPr is not None:
+                    ph = nvPr.find(qn('p:ph'))
+                    if ph is not None:
+                        ph_type = ph.get('type', '')
+                        ph_idx = ph.get('idx', '0')
+                        if ph_type == 'body' or ph_idx == '1':
+                            body_sp = sp
+                            break
+
+        if body_sp is None:
+            # Try finding any text body that's not the slide image placeholder
+            for sp in sp_tree.findall(qn('p:sp')):
+                txBody = sp.find(qn('p:txBody'))
+                if txBody is not None:
+                    nvSpPr = sp.find(qn('p:nvSpPr'))
+                    if nvSpPr is not None:
+                        nvPr = nvSpPr.find(qn('p:nvPr'))
+                        if nvPr is not None:
+                            ph = nvPr.find(qn('p:ph'))
+                            if ph is not None and ph.get('type', '') != 'sldImg':
+                                body_sp = sp
+                                break
+
+        if body_sp is None:
+            logger.warning(f"No body placeholder found in notes slide for page {page_number}")
+            return
+
+        # Clear existing text body and write new content
+        txBody = body_sp.find(qn('p:txBody'))
+        if txBody is None:
+            return
+
+        # Remove all existing paragraphs
+        for p in txBody.findall(qn('a:p')):
+            txBody.remove(p)
+
+        # Add new paragraphs from notes_text
+        for line in notes_text.split("\n"):
+            p_elem = etree.SubElement(txBody, qn('a:p'))
+            r_elem = etree.SubElement(p_elem, qn('a:r'))
+            # Add run properties with font size
+            rPr = etree.SubElement(r_elem, qn('a:rPr'))
+            rPr.set('lang', 'zh-TW')
+            rPr.set('sz', '1000')  # 10pt
+            t_elem = etree.SubElement(r_elem, qn('a:t'))
+            t_elem.text = line
+
+    def _create_notes_slide_manual(self, slide):
+        """Attempt to create a notes slide manually if the standard approach fails."""
+        try:
+            # Force creation through the presentation part
+            prs_part = slide.part.package.presentation_part
+            notes_master = prs_part.presentation.find(qn('p:notesMasterIdLst'))
+            if notes_master is None:
+                logger.warning("No notes master in presentation - cannot create notes slide")
+                return None
+            # Try the standard approach one more time after ensuring master exists
+            return slide.notes_slide
+        except Exception as e:
+            logger.warning(f"Manual notes slide creation failed: {e}")
+            return None
 
     # === Slide Type Methods ===
 
