@@ -1,22 +1,20 @@
 """
 Native PowerPoint generation engine with smart layout selection.
 
-Supports TS Holdings template with:
-- Cover pages (red gradient arc + large logo)
-- Chapter divider pages (section headers)
-- Content pages (clean white with bottom red line + small logo)
-- Blank pages (for full-size charts)
+Optimized for TS Holdings template:
+- Safe content area: avoid bottom red gradient + logo zone (below Y=5.8")
+- Title area: Y 0.3" to 1.2"
+- Content area: Y 1.4" to 5.6"
+- Speaker notes: AI analysis reasoning added to every content slide
 """
 
 import logging
 from io import BytesIO
-from typing import Any
 
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
-from pptx.enum.text import PP_ALIGN
-from pptx.util import Inches, Pt, Emu
+from pptx.util import Inches, Pt, Cm
 from pptx.dml.color import RGBColor
 
 from src.modules.ai_insight.models import PresentationPlan, SlideContent, ChartSpec
@@ -33,327 +31,352 @@ PPTX_CHART_TYPE_MAP = {
     "heatmap": XL_CHART_TYPE.COLUMN_CLUSTERED,
 }
 
+# Safe content zones (avoid template decorations)
+# Template is 13.333" x 7.5" (widescreen 16:9)
+TITLE_TOP = Inches(0.4)
+TITLE_HEIGHT = Inches(0.9)
+CONTENT_TOP = Inches(1.5)
+CONTENT_BOTTOM = Inches(5.6)  # Stop before bottom decoration
+CONTENT_HEIGHT = Inches(4.1)  # 5.6 - 1.5
+LEFT_MARGIN = Inches(0.6)
+RIGHT_MARGIN = Inches(0.6)
+SLIDE_WIDTH = Inches(13.333)
+FULL_CONTENT_WIDTH = Inches(12.1)  # 13.333 - 0.6 - 0.6
+
 
 class PptxGenerator:
-    """Generates PowerPoint presentations with native editable charts and smart layout selection."""
+    """Generates PPTX with native charts, smart layout selection, and speaker notes."""
 
     def __init__(self, plan: PresentationPlan, template_bytes: bytes | None = None):
         self._plan = plan
         if template_bytes:
             self._prs = Presentation(BytesIO(template_bytes))
-            # Remove existing slides from template (keep slide layouts/masters only)
+            # Remove existing slides, keep layouts
             while len(self._prs.slides) > 0:
                 rId = self._prs.slides._sldIdLst[0].rId
                 self._prs.part.drop_rel(rId)
                 del self._prs.slides._sldIdLst[0]
-            logger.info("Template loaded, existing slides cleared, layouts preserved")
+            logger.info("Template loaded, slides cleared")
         else:
             self._prs = Presentation()
-            self._prs.slide_width = Inches(13.333)  # 16:9 widescreen
+            self._prs.slide_width = Inches(13.333)
             self._prs.slide_height = Inches(7.5)
 
         self._layout_map = self._analyze_layouts()
-        logger.info(f"Layout mapping result: {self._layout_map}")
+        logger.info(f"Layout mapping: {self._layout_map}")
 
-    def _analyze_layouts(self) -> dict[str, int]:
-        """
-        Analyze template slide layouts and map them to content types.
-
-        Standard PowerPoint template layout indices (Traditional Chinese):
-        0: 標題投影片 (Title Slide) → Cover/Closing
-        1: 標題及內容 (Title and Content) → Main content pages
-        2: 區段標頭 (Section Header) → Chapter dividers
-        3: 兩個內容 (Two Content) → Two-column layouts
-        4: 比較 (Comparison) → Side-by-side comparison
-        5: 僅標題 (Title Only) → Chart-heavy pages
-        6: 空白 (Blank) → Full chart pages
-        """
+    def _analyze_layouts(self):
         layout_map = {}
         layouts = self._prs.slide_layouts
-
-        logger.info(f"Template has {len(layouts)} slide layouts:")
         for idx, layout in enumerate(layouts):
-            name = layout.name if layout.name else f"Layout_{idx}"
-            ph_count = len(layout.placeholders)
-            logger.info(f"  [{idx}] '{name}' ({ph_count} placeholders)")
-
-            name_lower = name.lower()
-
-            # Match by Chinese or English layout names
-            if any(kw in name_lower for kw in ["標題投影片", "title slide"]):
+            name = (layout.name or "").lower()
+            logger.info(f"  [{idx}] '{layout.name}'")
+            if any(kw in name for kw in ["標題投影片", "title slide"]):
                 if "title_cover" not in layout_map:
                     layout_map["title_cover"] = idx
-            elif any(kw in name_lower for kw in ["區段標頭", "section header", "section"]):
+            elif any(kw in name for kw in ["區段標頭", "section header"]):
                 if "section" not in layout_map:
                     layout_map["section"] = idx
-            elif any(kw in name_lower for kw in ["兩個內容", "two content", "比較", "comparison"]):
-                if "two_column" not in layout_map:
-                    layout_map["two_column"] = idx
-            elif any(kw in name_lower for kw in ["僅標題", "title only"]):
+            elif any(kw in name for kw in ["僅標題", "title only"]):
                 if "title_only" not in layout_map:
                     layout_map["title_only"] = idx
-            elif any(kw in name_lower for kw in ["空白", "blank"]):
+            elif any(kw in name for kw in ["空白", "blank"]):
                 if "blank" not in layout_map:
                     layout_map["blank"] = idx
-            elif any(kw in name_lower for kw in ["標題及內容", "title and content", "內容"]):
+            elif any(kw in name for kw in ["標題及內容", "title and content"]):
                 if "title_content" not in layout_map:
                     layout_map["title_content"] = idx
+            elif any(kw in name for kw in ["兩個內容", "two content"]):
+                if "two_column" not in layout_map:
+                    layout_map["two_column"] = idx
 
-        # Fallbacks based on standard PowerPoint template order
+        # Fallbacks
         if "title_cover" not in layout_map:
             layout_map["title_cover"] = 0
         if "title_content" not in layout_map:
             layout_map["title_content"] = min(1, len(layouts) - 1)
         if "section" not in layout_map:
             layout_map["section"] = min(2, len(layouts) - 1)
-        if "two_column" not in layout_map:
-            layout_map["two_column"] = layout_map["title_content"]
         if "title_only" not in layout_map:
             layout_map["title_only"] = layout_map["title_content"]
         if "blank" not in layout_map:
             layout_map["blank"] = min(len(layouts) - 1, 6)
-
+        if "two_column" not in layout_map:
+            layout_map["two_column"] = layout_map["title_content"]
         return layout_map
 
     def _get_smart_layout(self, content: SlideContent):
-        """
-        Choose the best slide layout based on content type.
-
-        TS Holdings template mapping:
-        - Cover (P.1) and Closing (P.19) → title_cover (layout 0): red arc + big logo
-        - Chapter dividers (P.4,9,12,15,17) → section (layout 2): red arc + CHAPTER XX
-        - Content with charts → title_only or blank: maximum chart space
-        - Bullet point content → title_content (layout 1): title + body area
-        - Two-column → two_column (layout 3): side-by-side
-        """
-        layout_type = content.layout_type
+        lt = content.layout_type
         has_chart = content.chart and content.chart.categories and content.chart.data_series
         is_first = content.page_number == 1
         is_last = content.page_number == len(self._plan.slides)
+        is_divider = (lt == "title_slide" and not is_first)
 
-        # Detect chapter divider: title_slide type but NOT first page
-        is_chapter_divider = (
-            layout_type == "title_slide" and not is_first
-        )
-
-        if is_first:
-            # First page: Cover with big branding
+        if is_first or is_last:
             idx = self._layout_map["title_cover"]
-        elif is_last:
-            # Last page: Same as cover (Thank you page)
-            idx = self._layout_map["title_cover"]
-        elif is_chapter_divider:
-            # Chapter divider pages
+        elif is_divider:
             idx = self._layout_map["section"]
-        elif layout_type == "full_chart" and has_chart:
-            # Full-page chart: use title_only or blank for max space
-            idx = self._layout_map.get("title_only", self._layout_map.get("blank", 1))
-        elif layout_type == "content_with_chart" and has_chart:
-            # Content + chart: title_only gives title + blank area
+        elif lt == "full_chart" and has_chart:
             idx = self._layout_map.get("title_only", self._layout_map["title_content"])
-        elif layout_type == "two_column":
-            idx = self._layout_map["two_column"]
+        elif has_chart:
+            idx = self._layout_map.get("title_only", self._layout_map["title_content"])
         else:
-            # Default: standard content page with title + content area
             idx = self._layout_map["title_content"]
 
         layouts = self._prs.slide_layouts
         return layouts[idx] if idx < len(layouts) else layouts[0]
 
     def generate(self) -> bytes:
-        """Generate complete PPTX presentation."""
-        for slide_content in self._plan.slides:
-            self._add_slide(slide_content)
-        buffer = BytesIO()
-        self._prs.save(buffer)
-        buffer.seek(0)
-        return buffer.read()
+        for sc in self._plan.slides:
+            self._add_slide(sc)
+        buf = BytesIO()
+        self._prs.save(buf)
+        buf.seek(0)
+        return buf.read()
 
     def _add_slide(self, content: SlideContent):
-        """Route slide creation based on content type."""
-        layout_type = content.layout_type
-        if layout_type == "title_slide":
+        lt = content.layout_type
+        if lt == "title_slide":
             if content.page_number == 1:
                 self._add_title_slide(content)
             else:
                 self._add_chapter_divider(content)
-        elif layout_type == "full_chart":
+        elif lt == "full_chart":
             self._add_full_chart_slide(content)
-        elif layout_type == "content_with_chart":
+        elif lt == "content_with_chart":
             self._add_content_with_chart_slide(content)
-        elif layout_type == "two_column":
+        elif lt == "two_column":
             self._add_two_column_slide(content)
         else:
             self._add_content_only_slide(content)
 
-    def _add_title_slide(self, content: SlideContent):
-        """Add cover slide (first page)."""
-        slide_layout = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(slide_layout)
+    def _add_speaker_notes(self, slide, content: SlideContent):
+        """Add AI analysis reasoning to speaker notes."""
+        notes_parts = []
 
+        if content.insight_driver:
+            notes_parts.append(f"【AI 分析驅動因素】\n{content.insight_driver}")
+
+        if content.bullet_points:
+            notes_parts.append(f"【關鍵要點】\n" + "\n".join(f"• {bp}" for bp in content.bullet_points))
+
+        if content.chart and content.chart.title:
+            notes_parts.append(f"【圖表說明】\n圖表類型：{content.chart.chart_type}\n圖表標題：{content.chart.title}")
+            if content.chart.categories:
+                notes_parts.append(f"資料維度：{', '.join(content.chart.categories[:5])}{'...' if len(content.chart.categories) > 5 else ''}")
+
+        notes_parts.append(f"【頁面資訊】\n第 {content.page_number} 頁 | 版面類型：{content.layout_type}")
+
+        notes_text = "\n\n".join(notes_parts)
+
+        # Add notes to slide
+        notes_slide = slide.notes_slide
+        notes_slide.notes_text_frame.text = notes_text
+
+    # === Slide Type Methods ===
+
+    def _add_title_slide(self, content: SlideContent):
+        """Cover page — title centered, avoid bottom area."""
+        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
         if slide.shapes.title:
             slide.shapes.title.text = content.title
         else:
             self._add_text_box(slide, content.title,
-                               Inches(2), Inches(2), Inches(9), Inches(1.5), Pt(32), bold=True)
-
+                               Inches(2), Inches(2.5), Inches(9), Inches(1.5), Pt(32), bold=True)
         if content.subtitle:
             self._add_text_box(slide, content.subtitle,
-                               Inches(2), Inches(3.8), Inches(9), Inches(1), Pt(16))
+                               Inches(2), Inches(4.2), Inches(9), Inches(0.8), Pt(16))
+        self._add_speaker_notes(slide, content)
 
     def _add_chapter_divider(self, content: SlideContent):
-        """Add chapter/section divider page."""
-        slide_layout = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(slide_layout)
-
+        """Section divider — centered title on section layout."""
+        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
         if slide.shapes.title:
             slide.shapes.title.text = content.title
         else:
             self._add_text_box(slide, content.title,
                                Inches(3), Inches(3), Inches(7), Inches(1.5), Pt(28), bold=True)
+        self._add_speaker_notes(slide, content)
 
     def _add_content_with_chart_slide(self, content: SlideContent):
-        """Add slide with bullet points (left) and chart (right)."""
-        slide_layout = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(slide_layout)
-
+        """Left: bullet points, Right: chart. Both within safe zone."""
+        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
         self._set_slide_title(slide, content.title)
 
-        # Bullet points (left side)
+        # Left: bullets (within safe zone)
         if content.bullet_points:
-            bullets = "\n".join(f"• {bp}" for bp in content.bullet_points)
+            bullets = "\n\n".join(f"• {bp}" for bp in content.bullet_points[:5])
             self._add_text_box(slide, bullets,
-                               Inches(0.5), Inches(1.6), Inches(5.5), Inches(4.5), Pt(11))
+                               LEFT_MARGIN, CONTENT_TOP,
+                               Inches(5.0), CONTENT_HEIGHT, Pt(11))
 
-        # Chart (right side)
+        # Right: chart (within safe zone, enough space for legend)
         if content.chart:
             self._add_native_chart(slide, content.chart,
-                                   Inches(6.2), Inches(1.6), Inches(6.5), Inches(4.5))
+                                   Inches(6.0), CONTENT_TOP,
+                                   Inches(6.7), CONTENT_HEIGHT)
+
+        self._add_speaker_notes(slide, content)
 
     def _add_full_chart_slide(self, content: SlideContent):
-        """Add slide with full-width chart."""
-        slide_layout = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(slide_layout)
-
+        """Full-width chart within safe content zone."""
+        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
         self._set_slide_title(slide, content.title)
 
-        # Full-width chart
+        # Chart: full width but within safe vertical zone
         if content.chart:
             self._add_native_chart(slide, content.chart,
-                                   Inches(0.5), Inches(1.5), Inches(12.3), Inches(5.0))
+                                   LEFT_MARGIN, CONTENT_TOP,
+                                   FULL_CONTENT_WIDTH, Inches(3.8))
 
-        # Insight at bottom
+        # Insight text below chart (still in safe zone)
         if content.insight_driver:
             self._add_text_box(slide, f"◆ {content.insight_driver}",
-                               Inches(0.5), Inches(6.6), Inches(12.0), Inches(0.5), Pt(9), italic=True)
+                               LEFT_MARGIN, Inches(5.4),
+                               FULL_CONTENT_WIDTH, Inches(0.4), Pt(9), italic=True)
+
+        self._add_speaker_notes(slide, content)
 
     def _add_two_column_slide(self, content: SlideContent):
-        """Add two-column layout slide."""
-        slide_layout = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(slide_layout)
-
+        """Two-column: bullets left, chart/table right."""
+        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
         self._set_slide_title(slide, content.title)
 
-        # Left column: bullets
+        # Left column
         if content.bullet_points:
-            bullets = "\n".join(f"• {bp}" for bp in content.bullet_points)
+            bullets = "\n\n".join(f"• {bp}" for bp in content.bullet_points[:5])
             self._add_text_box(slide, bullets,
-                               Inches(0.5), Inches(1.6), Inches(6.0), Inches(4.5), Pt(11))
+                               LEFT_MARGIN, CONTENT_TOP,
+                               Inches(5.8), CONTENT_HEIGHT, Pt(11))
 
-        # Right column: chart or table
+        # Right column
         if content.chart:
             self._add_native_chart(slide, content.chart,
-                                   Inches(6.8), Inches(1.6), Inches(6.0), Inches(4.5))
+                                   Inches(6.8), CONTENT_TOP,
+                                   Inches(5.9), CONTENT_HEIGHT)
         elif content.table:
             self._add_table(slide, content.table.headers, content.table.rows,
-                           left=Inches(6.8), top=Inches(1.6),
-                           width=Inches(6.0), height=Inches(4.5))
+                           left=Inches(6.8), top=CONTENT_TOP,
+                           width=Inches(5.9), height=CONTENT_HEIGHT)
+
+        self._add_speaker_notes(slide, content)
 
     def _add_content_only_slide(self, content: SlideContent):
-        """Add text-only content slide."""
-        slide_layout = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(slide_layout)
-
+        """Text-only slide within safe zone."""
+        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
         self._set_slide_title(slide, content.title)
 
-        # Full-width bullet points
+        # Bullets in safe zone
         if content.bullet_points:
             bullets = "\n\n".join(f"• {bp}" for bp in content.bullet_points)
             self._add_text_box(slide, bullets,
-                               Inches(0.8), Inches(1.6), Inches(11.5), Inches(4.5), Pt(13))
+                               LEFT_MARGIN, CONTENT_TOP,
+                               FULL_CONTENT_WIDTH, Inches(3.6), Pt(12))
 
-        # Insight driver
+        # Insight in safe zone
         if content.insight_driver:
             self._add_text_box(slide, f"◆ 驅動因素：{content.insight_driver}",
-                               Inches(0.8), Inches(6.2), Inches(11.5), Inches(0.6), Pt(10), italic=True)
+                               LEFT_MARGIN, Inches(5.2),
+                               FULL_CONTENT_WIDTH, Inches(0.5), Pt(10), italic=True)
 
-    # === Chart & Table Helpers ===
+        self._add_speaker_notes(slide, content)
+
+    # === Chart & Table ===
 
     def _add_native_chart(self, slide, chart_spec: ChartSpec, left, top, width, height):
-        """Add a native editable chart to the slide."""
+        """Add native editable chart with improved readability."""
         if not chart_spec.categories or not chart_spec.data_series:
             return
         try:
-            chart_type = PPTX_CHART_TYPE_MAP.get(chart_spec.chart_type, XL_CHART_TYPE.COLUMN_CLUSTERED)
-            chart_data = CategoryChartData()
-            chart_data.categories = chart_spec.categories
-            for series in chart_spec.data_series:
-                values = series.values[:len(chart_spec.categories)]
-                while len(values) < len(chart_spec.categories):
-                    values.append(0)
-                chart_data.add_series(series.name, tuple(values))
+            ct = PPTX_CHART_TYPE_MAP.get(chart_spec.chart_type, XL_CHART_TYPE.COLUMN_CLUSTERED)
+            cd = CategoryChartData()
+            # Limit categories for readability (max 12)
+            categories = chart_spec.categories[:12]
+            cd.categories = categories
 
-            chart_frame = slide.shapes.add_chart(chart_type, left, top, width, height, chart_data)
-            chart = chart_frame.chart
-            chart.has_legend = len(chart_spec.data_series) > 1
+            for s in chart_spec.data_series:
+                v = s.values[:len(categories)]
+                while len(v) < len(categories):
+                    v.append(0)
+                cd.add_series(s.name, tuple(v))
+
+            cf = slide.shapes.add_chart(ct, left, top, width, height, cd)
+            ch = cf.chart
+
+            # Legend: show if multiple series, position at bottom to save space
+            ch.has_legend = len(chart_spec.data_series) > 1
+            if ch.has_legend:
+                from pptx.enum.chart import XL_LEGEND_POSITION
+                ch.legend.position = XL_LEGEND_POSITION.BOTTOM
+                ch.legend.include_in_layout = False
+
+            # Chart title: concise
             if chart_spec.title:
-                chart.has_title = True
-                chart.chart_title.text_frame.text = chart_spec.title
-                chart.chart_title.text_frame.paragraphs[0].font.size = Pt(10)
-            logger.info(f"Added native {chart_spec.chart_type} chart: '{chart_spec.title}'")
+                ch.has_title = True
+                ch.chart_title.text_frame.text = chart_spec.title[:40]
+                ch.chart_title.text_frame.paragraphs[0].font.size = Pt(9)
+                ch.chart_title.text_frame.paragraphs[0].font.bold = True
+
+            # Improve axis readability
+            try:
+                if hasattr(ch, 'category_axis'):
+                    ch.category_axis.tick_labels.font.size = Pt(8)
+                if hasattr(ch, 'value_axis'):
+                    ch.value_axis.tick_labels.font.size = Pt(8)
+                    ch.value_axis.has_major_gridlines = True
+            except Exception:
+                pass
+
+            logger.info(f"Chart added: '{chart_spec.title}' ({chart_spec.chart_type})")
         except Exception as e:
-            logger.warning(f"Failed to add chart '{chart_spec.title}': {e}")
+            logger.warning(f"Chart failed '{chart_spec.title}': {e}")
 
     def _add_table(self, slide, headers, rows, **pos):
-        """Add a native table to the slide."""
-        row_count = len(rows) + 1
-        col_count = len(headers)
-        tbl = slide.shapes.add_table(
-            row_count, col_count, pos["left"], pos["top"], pos["width"], pos["height"]
-        ).table
+        """Add table with clean formatting."""
+        rc = min(len(rows) + 1, 12)  # Max 12 rows for readability
+        cc = len(headers)
+        t = slide.shapes.add_table(rc, cc, pos["left"], pos["top"], pos["width"], pos["height"]).table
         for i, h in enumerate(headers):
-            tbl.cell(0, i).text = h
-            tbl.cell(0, i).text_frame.paragraphs[0].font.bold = True
-            tbl.cell(0, i).text_frame.paragraphs[0].font.size = Pt(9)
-        for ri, row in enumerate(rows, 1):
+            t.cell(0, i).text = h
+            t.cell(0, i).text_frame.paragraphs[0].font.bold = True
+            t.cell(0, i).text_frame.paragraphs[0].font.size = Pt(9)
+        for ri, row in enumerate(rows[:rc - 1], 1):
             for ci, val in enumerate(row):
-                if ci < col_count:
-                    tbl.cell(ri, ci).text = str(val)
-                    tbl.cell(ri, ci).text_frame.paragraphs[0].font.size = Pt(8)
+                if ci < cc:
+                    t.cell(ri, ci).text = str(val)
+                    t.cell(ri, ci).text_frame.paragraphs[0].font.size = Pt(8)
 
-    # === Utility Helpers ===
+    # === Utilities ===
 
     def _set_slide_title(self, slide, title: str):
-        """Set slide title using placeholder or text box."""
+        """Set title in the safe title area."""
         if slide.shapes.title:
             slide.shapes.title.text = title
+            # Ensure title font is readable
+            for para in slide.shapes.title.text_frame.paragraphs:
+                para.font.size = Pt(22)
+                para.font.bold = True
         else:
             self._add_text_box(slide, title,
-                               Inches(0.5), Inches(0.3), Inches(12.0), Inches(0.9), Pt(22), bold=True)
+                               LEFT_MARGIN, TITLE_TOP,
+                               FULL_CONTENT_WIDTH, TITLE_HEIGHT, Pt(22), bold=True)
 
     def _add_text_box(self, slide, text, left, top, width, height,
                       font_size=Pt(12), bold=False, italic=False):
-        """Add a formatted text box."""
-        txBox = slide.shapes.add_textbox(left, top, width, height)
-        tf = txBox.text_frame
+        """Add text box with proper formatting."""
+        tb = slide.shapes.add_textbox(left, top, width, height)
+        tf = tb.text_frame
         tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = text
-        p.font.size = font_size
-        p.font.bold = bold
-        p.font.italic = italic
 
-    def _get_layout(self, index: int):
-        """Get slide layout by index (legacy fallback)."""
-        layouts = self._prs.slide_layouts
-        return layouts[index] if index < len(layouts) else layouts[0]
+        # Split by newlines and add as separate paragraphs for proper spacing
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if i == 0:
+                p = tf.paragraphs[0]
+            else:
+                p = tf.add_paragraph()
+            p.text = line
+            p.font.size = font_size
+            p.font.bold = bold
+            p.font.italic = italic
+            p.space_after = Pt(4)
