@@ -358,8 +358,8 @@ class PptxGenerator:
     # === Utilities ===
 
     def _set_slide_title(self, slide, title: str):
-        """Set title in the safe title area, clearing any conflicting placeholders."""
-        # First, try to use the existing title placeholder
+        """Set title, and hide empty content placeholders to avoid text overlap."""
+        # Use the existing title placeholder
         if slide.shapes.title:
             slide.shapes.title.text = title
             for para in slide.shapes.title.text_frame.paragraphs:
@@ -370,18 +370,19 @@ class PptxGenerator:
                                LEFT_MARGIN, TITLE_TOP,
                                FULL_CONTENT_WIDTH, TITLE_HEIGHT, Pt(22), bold=True)
 
-        # Remove empty body placeholders to prevent "按一下以新增文字" overlap
-        from pptx.shapes.placeholder import _InheritsDimensions
-        shapes_to_skip = []
-        for shape in slide.shapes:
-            if shape.has_text_frame and shape != slide.shapes.title:
-                if shape.text_frame.text == "" or "按一下" in shape.text_frame.text or "Click to" in shape.text_frame.text.lower():
-                    shapes_to_skip.append(shape)
-
-        # Remove empty placeholders by making them invisible
-        for shape in shapes_to_skip:
-            sp = shape._element
-            sp.getparent().remove(sp)
+        # Hide empty body/content placeholders (don't remove - that breaks background)
+        # Just clear their text and move them off-screen
+        for shape in list(slide.shapes):
+            if not shape.has_text_frame:
+                continue
+            if shape == slide.shapes.title:
+                continue
+            # Check if it's an empty placeholder with default text
+            tf_text = shape.text_frame.text.strip()
+            if tf_text == "" or "按一下" in tf_text or "Click to" in tf_text.lower() or "新增" in tf_text:
+                # Move off-screen instead of deleting (preserves template background)
+                shape.left = Inches(20)
+                shape.top = Inches(20)
 
     def _add_text_box(self, slide, text, left, top, width, height,
                       font_size=Pt(12), bold=False, italic=False):
