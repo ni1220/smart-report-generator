@@ -130,11 +130,13 @@ class PptxGenerator:
         return layouts[idx] if idx < len(layouts) else layouts[0]
 
     def generate(self) -> bytes:
+        logger.info(f"PptxGenerator v2.1 (with speaker notes) - generating {len(self._plan.slides)} slides")
         for sc in self._plan.slides:
             self._add_slide(sc)
         buf = BytesIO()
         self._prs.save(buf)
         buf.seek(0)
+        logger.info("PPTX generation complete with speaker notes on all slides")
         return buf.read()
 
     def _add_slide(self, content: SlideContent):

@@ -64,7 +64,7 @@ fi
 # 2. Install dependencies
 echo ""
 echo "[2/5] 安裝 Python 依賴套件..."
-pip install python-pptx==1.0.2 openpyxl==3.1.5 pydantic==2.10.3 -t package/ -q
+pip install python-pptx==1.0.2 openpyxl==3.1.5 pydantic==2.10.3 lxml -t package/ -q
 echo "  ✓ 依賴套件安裝完成"
 
 # 3. Create ZIP
@@ -92,10 +92,39 @@ aws lambda update-function-code \
     --region $REGION \
     --no-cli-pager
 
+# Wait for update to complete
+echo "  等待更新完成..."
+aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region $REGION 2>/dev/null || sleep 5
+
+# Verify handler configuration
+echo ""
+echo "=== 驗證 Lambda 設定 ==="
+HANDLER=$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --region $REGION --query 'Handler' --output text 2>/dev/null)
+LAST_MOD=$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --region $REGION --query 'LastModified' --output text 2>/dev/null)
+echo "  Handler: $HANDLER"
+echo "  Last Modified: $LAST_MOD"
+
+# Ensure handler is correct
+EXPECTED_HANDLER="src.modules.report_generator.lambda_handler.handler"
+if [ "$HANDLER" != "$EXPECTED_HANDLER" ]; then
+    echo "  ⚠️  Handler 不正確！正在修正..."
+    aws lambda update-function-configuration \
+        --function-name "$FUNCTION_NAME" \
+        --handler "$EXPECTED_HANDLER" \
+        --region $REGION \
+        --no-cli-pager
+    echo "  ✓ Handler 已更正為: $EXPECTED_HANDLER"
+else
+    echo "  ✓ Handler 正確"
+fi
+
 echo ""
 echo "=== ✅ 部署完成！ ==="
 echo ""
 echo "驗證指令："
-echo "  aws lambda get-function-configuration --function-name $FUNCTION_NAME --region $REGION --query 'LastModified' --output text"
+echo "  aws lambda get-function-configuration --function-name $FUNCTION_NAME --region $REGION --query '[LastModified, Handler]' --output text"
 echo ""
 echo "測試生成報告後，下載 PPTX 並在 PowerPoint 中查看「備忘稿」(Notes) 面板。"
+echo ""
+echo "查看日誌（確認 notes 是否寫入）："
+echo "  aws logs tail /aws/lambda/$FUNCTION_NAME --region $REGION --since 5m --filter-pattern 'Speaker notes'"
