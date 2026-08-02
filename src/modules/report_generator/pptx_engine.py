@@ -48,152 +48,142 @@ FULL_CONTENT_WIDTH = Inches(12.1)  # 13.333 - 0.6 - 0.6
 
 
 class PptxGenerator:
-    """Generates PPTX with native charts, smart layout selection, and speaker notes."""
+    """Generates PPTX with native charts, smart layout selection, and speaker notes.
+    
+    Template strategy (v3 - template-first):
+    - If a template is provided, keep its slides intact as backgrounds
+    - Duplicate template slides to reach 16 pages
+    - Clear text placeholders on each slide, then fill with new AI content
+    - Add speaker notes last
+    - This preserves all template decorations (images, gradients, logos)
+    """
 
     def __init__(self, plan: PresentationPlan, template_bytes: bytes | None = None):
         self._plan = plan
-        self._template_slides_xml = []  # Store original template slide XML for reuse
+        self._has_template = template_bytes is not None
 
         if template_bytes:
             self._prs = Presentation(BytesIO(template_bytes))
-            self._slide_width = self._prs.slide_width
-            self._slide_height = self._prs.slide_height
+            num_template_slides = len(self._prs.slides)
+            logger.info(f"Template loaded with {num_template_slides} slides")
 
-            # Store template slides info before clearing
-            self._catalog_template_slides()
+            # Categorize template slides by their visual purpose
+            self._template_slide_categories = self._categorize_template_slides()
 
-            # Remove existing slides but keep layouts
-            while len(self._prs.slides) > 0:
-                rId = self._prs.slides._sldIdLst[0].rId
-                self._prs.part.drop_rel(rId)
-                del self._prs.slides._sldIdLst[0]
-            logger.info(f"Template loaded: {len(self._template_slides_xml)} slides cataloged, slides cleared")
+            # Build 16 slides from template: duplicate existing slides as needed
+            self._prepare_16_slides_from_template(num_template_slides)
         else:
             self._prs = Presentation()
             self._prs.slide_width = Inches(13.333)
             self._prs.slide_height = Inches(7.5)
+            self._template_slide_categories = {}
 
-        self._layout_map = self._analyze_layouts()
-        logger.info(f"Layout mapping: {self._layout_map}")
+        if not self._has_template:
+            self._layout_map = self._analyze_layouts()
+            logger.info(f"Layout mapping: {self._layout_map}")
 
-    def _catalog_template_slides(self):
-        """
-        Analyze template slides and categorize them by visual type.
-        Store the XML of non-placeholder shapes (background decorations) from each.
-        
-        Strategy: For each unique layout used in the template, extract the decorative
-        shapes (images, filled rectangles, logos, gradients) that form the background.
-        These will be re-applied to new slides.
-        """
-        seen_layouts = set()
-        
-        for slide_idx, slide in enumerate(self._prs.slides):
-            # Find which layout index this slide uses
-            layout_idx = None
-            for idx, layout in enumerate(self._prs.slide_layouts):
-                if slide.slide_layout == layout:
-                    layout_idx = idx
-                    break
+    def _categorize_template_slides(self):
+        """Categorize each template slide as 'cover', 'content', or 'divider'."""
+        categories = {}
+        for idx, slide in enumerate(self._prs.slides):
+            # Count shapes to estimate slide type
+            shape_count = len(slide.shapes)
+            has_title_ph = slide.shapes.title is not None
             
-            if layout_idx is None:
-                layout_idx = slide_idx  # fallback: use slide position
-
-            # Extract ALL shapes from this slide (both decorative and placeholder)
-            sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
-            
-            # Separate decorative shapes from placeholders
-            decorative_shapes = []
-            for shape_elem in list(sp_tree):
-                tag = shape_elem.tag
-                if tag in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
-                    continue
-                
-                is_placeholder = False
-                # Check p:sp placeholders
-                nvSpPr = shape_elem.find(qn('p:nvSpPr'))
-                if nvSpPr is not None:
-                    nvPr = nvSpPr.find(qn('p:nvPr'))
-                    if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
-                        is_placeholder = True
-                
-                # Check p:pic (pictures are usually decorative backgrounds)
-                nvPicPr = shape_elem.find(qn('p:nvPicPr'))
-                if nvPicPr is not None:
-                    nvPr = nvPicPr.find(qn('p:nvPr'))
-                    if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
-                        is_placeholder = True
-
-                if not is_placeholder and tag in [qn('p:sp'), qn('p:pic'), qn('p:grpSp'), qn('p:cxnSp')]:
-                    decorative_shapes.append(copy.deepcopy(shape_elem))
-
-            slide_info = {
-                'layout_idx': layout_idx,
-                'slide_idx': slide_idx,
-                'decorative_shapes': decorative_shapes,
-                'shape_count': len(decorative_shapes),
-            }
-            self._template_slides_xml.append(slide_info)
-            logger.info(f"  Template slide [{slide_idx}] layout={layout_idx}: {len(decorative_shapes)} decorative shapes")
-
-    def _get_best_template_bg(self, content: SlideContent) -> list:
-        """
-        AI-like selection: choose the best template slide background for this content.
+            # Heuristic: first slide is cover, last might be ending
+            # Slides with fewer shapes are likely content templates
+            if idx == 0:
+                categories[idx] = 'cover'
+            elif shape_count > 5:
+                categories[idx] = 'decorated'  # heavily decorated (divider/cover)
+            else:
+                categories[idx] = 'content'  # cleaner layout for content
         
-        Logic:
-        - Cover/ending pages → use the first template slide (usually most decorated)
-        - Section dividers → use a slide with medium decoration
-        - Content pages with charts → use the cleanest (least decorated) slide
-        - Text-only pages → use moderate decoration
+        logger.info(f"Template slide categories: {categories}")
+        return categories
+
+    def _prepare_16_slides_from_template(self, num_template_slides: int):
         """
-        if not self._template_slides_xml:
-            return []
-
-        is_first = content.page_number == 1
-        is_last = content.page_number == len(self._plan.slides)
-        has_chart = content.chart and content.chart.categories and content.chart.data_series
-        is_divider = content.layout_type == "title_slide" and not is_first
-
-        # Sort template slides by decoration density
-        sorted_slides = sorted(self._template_slides_xml, key=lambda s: s['shape_count'], reverse=True)
+        Ensure we have exactly 16 slides by duplicating template slides.
+        Strategy:
+        - Keep slide 0 as cover (page 1)
+        - Use the cleanest slides for content pages
+        - Duplicate as needed to reach 16
+        """
+        target = 16
         
-        if is_first or is_last:
-            # Cover/ending: use the most decorated template slide
-            chosen = sorted_slides[0]
-        elif is_divider:
-            # Divider: use moderately decorated
-            mid_idx = len(sorted_slides) // 2
-            chosen = sorted_slides[min(mid_idx, len(sorted_slides) - 1)]
-        elif has_chart:
-            # Charts need clean space: use the least decorated
-            chosen = sorted_slides[-1]
-        else:
-            # Content pages: use least decorated (more space for text)
-            chosen = sorted_slides[-1]
-
-        return chosen['decorative_shapes']
-
-    def _apply_template_background(self, slide, content: SlideContent):
-        """Apply the best-matching template background to a new slide."""
-        bg_shapes = self._get_best_template_bg(content)
-        if not bg_shapes:
+        if num_template_slides >= target:
+            # Template has enough slides, remove extras
+            while len(self._prs.slides) > target:
+                rId = self._prs.slides._sldIdLst[-1].rId
+                self._prs.part.drop_rel(rId)
+                del self._prs.slides._sldIdLst[-1]
+            logger.info(f"Template trimmed to {target} slides")
             return
 
+        # Need to duplicate slides to reach 16
+        # Find the best "content" slide to duplicate (least decorated)
+        best_content_idx = self._find_best_content_slide()
+        
+        # Duplicate slides until we have 16
+        slides_to_add = target - num_template_slides
+        logger.info(f"Duplicating slide [{best_content_idx}] {slides_to_add} times to reach {target}")
+        
+        for _ in range(slides_to_add):
+            self._duplicate_slide(best_content_idx)
+
+    def _find_best_content_slide(self):
+        """Find the template slide best suited for content (least decorated, not cover)."""
+        best_idx = min(1, len(self._prs.slides) - 1)  # Default: second slide
+        min_shapes = 999
+        
+        for idx, slide in enumerate(self._prs.slides):
+            if idx == 0:
+                continue  # Skip cover
+            shape_count = len(slide.shapes)
+            if shape_count < min_shapes:
+                min_shapes = shape_count
+                best_idx = idx
+        
+        return best_idx
+
+    def _duplicate_slide(self, src_idx: int):
+        """Duplicate a slide (preserving all shapes, images, and relationships)."""
         try:
-            sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
-
-            # Find insertion point (after nvGrpSpPr and grpSpPr)
-            insert_pos = 0
-            for i, child in enumerate(sp_tree):
-                if child.tag in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
-                    insert_pos = i + 1
-
-            # Insert background shapes at the back (behind content)
-            for shape_xml in bg_shapes:
-                sp_tree.insert(insert_pos, copy.deepcopy(shape_xml))
-                insert_pos += 1
+            src_slide = self._prs.slides[src_idx]
+            # Use the same layout as the source slide
+            layout = src_slide.slide_layout
+            new_slide = self._prs.slides.add_slide(layout)
+            
+            # Copy all shapes from source to new slide
+            src_sp_tree = src_slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
+            dst_sp_tree = new_slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
+            
+            # Remove default placeholder shapes from new slide
+            for child in list(dst_sp_tree):
+                if child.tag not in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
+                    dst_sp_tree.remove(child)
+            
+            # Copy shapes from source (including images via relationships)
+            for child in src_sp_tree:
+                if child.tag not in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
+                    dst_sp_tree.append(copy.deepcopy(child))
+            
+            # Copy background if exists
+            src_cSld = src_slide._element.find(qn('p:cSld'))
+            dst_cSld = new_slide._element.find(qn('p:cSld'))
+            src_bg = src_cSld.find(qn('p:bg'))
+            if src_bg is not None:
+                dst_bg = dst_cSld.find(qn('p:bg'))
+                if dst_bg is not None:
+                    dst_cSld.remove(dst_bg)
+                dst_cSld.insert(0, copy.deepcopy(src_bg))
 
         except Exception as e:
-            logger.warning(f"Failed to apply template background: {e}")
+            logger.warning(f"Failed to duplicate slide {src_idx}: {e}")
+            # Fallback: just add a blank slide with the layout
+            layout = self._prs.slides[src_idx].slide_layout
+            self._prs.slides.add_slide(layout)
 
     def _analyze_layouts(self):
         layout_map = {}
@@ -258,15 +248,41 @@ class PptxGenerator:
         return layout, idx
 
     def _create_slide(self, content: SlideContent):
-        """Create a new slide with layout and apply template background shapes."""
-        layout, layout_idx = self._get_smart_layout(content)
-        slide = self._prs.slides.add_slide(layout)
-        # Apply best-matching template background decorations
-        self._apply_template_background(slide, content)
-        return slide
+        """Get or create slide for this content page.
+        
+        Template mode: slides already exist (prepared in __init__), just return them.
+        Blank mode: create new slide with layout.
+        """
+        if self._has_template:
+            # Template mode: slides already prepared, just return the correct one
+            slide_idx = content.page_number - 1  # 0-indexed
+            if slide_idx < len(self._prs.slides):
+                slide = self._prs.slides[slide_idx]
+                # Clear existing text content from placeholders (keep decorative shapes)
+                self._clear_slide_text(slide)
+                return slide
+            else:
+                # Shouldn't happen, but fallback to adding a new slide
+                layout = self._prs.slide_layouts[0]
+                return self._prs.slides.add_slide(layout)
+        else:
+            # Blank mode: create new slide from layout
+            layout, _ = self._get_smart_layout(content)
+            return self._prs.slides.add_slide(layout)
+
+    def _clear_slide_text(self, slide):
+        """Clear text from placeholders on a template slide, keeping background shapes."""
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                # Check if it's a placeholder (using is_placeholder property)
+                try:
+                    if shape.is_placeholder:
+                        shape.text_frame.clear()
+                except (AttributeError, ValueError):
+                    pass  # Not a placeholder, skip
 
     def generate(self) -> bytes:
-        logger.info(f"PptxGenerator v2.1 (with speaker notes) - generating {len(self._plan.slides)} slides")
+        logger.info(f"PptxGenerator v3.0 (template-first) - generating {len(self._plan.slides)} slides, template={self._has_template}")
         for sc in self._plan.slides:
             self._add_slide(sc)
         buf = BytesIO()
