@@ -52,8 +52,15 @@ class PptxGenerator:
 
     def __init__(self, plan: PresentationPlan, template_bytes: bytes | None = None):
         self._plan = plan
+        self._bg_shapes_by_layout = {}  # Cache background shapes from template
+
         if template_bytes:
             self._prs = Presentation(BytesIO(template_bytes))
+
+            # Before clearing slides, extract background shapes from each slide
+            # (template backgrounds are often stored as shapes on slides, not in layouts)
+            self._extract_template_backgrounds()
+
             # Remove existing slides, keep layouts
             while len(self._prs.slides) > 0:
                 rId = self._prs.slides._sldIdLst[0].rId
@@ -67,6 +74,85 @@ class PptxGenerator:
 
         self._layout_map = self._analyze_layouts()
         logger.info(f"Layout mapping: {self._layout_map}")
+
+    def _extract_template_backgrounds(self):
+        """
+        Extract non-placeholder background shapes from template slides.
+        These are typically decorative elements (gradients, logos, colored bars)
+        that exist on the slide itself rather than in the layout/master.
+        """
+        try:
+            for slide in self._prs.slides:
+                # Identify which layout this slide uses
+                layout_idx = None
+                for idx, layout in enumerate(self._prs.slide_layouts):
+                    if slide.slide_layout == layout:
+                        layout_idx = idx
+                        break
+
+                if layout_idx is None:
+                    continue
+
+                # Only store the first occurrence per layout
+                if layout_idx in self._bg_shapes_by_layout:
+                    continue
+
+                # Extract non-placeholder shapes (decorative backgrounds)
+                bg_shapes_xml = []
+                sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
+                for shape_elem in sp_tree:
+                    tag = shape_elem.tag
+                    # Skip groupShape wrapper, placeholders, and notes
+                    if tag == qn('p:nvGrpSpPr') or tag == qn('p:grpSpPr'):
+                        continue
+
+                    # Check if it's a placeholder (skip those)
+                    is_placeholder = False
+                    nvSpPr = shape_elem.find(qn('p:nvSpPr'))
+                    if nvSpPr is not None:
+                        nvPr = nvSpPr.find(qn('p:nvPr'))
+                        if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
+                            is_placeholder = True
+
+                    nvCxnSpPr = shape_elem.find(qn('p:nvCxnSpPr'))
+                    if nvCxnSpPr is not None:
+                        nvPr = nvCxnSpPr.find(qn('p:nvPr'))
+                        if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
+                            is_placeholder = True
+
+                    if not is_placeholder and tag in [qn('p:sp'), qn('p:pic'), qn('p:grpSp'), qn('p:cxnSp')]:
+                        bg_shapes_xml.append(copy.deepcopy(shape_elem))
+
+                if bg_shapes_xml:
+                    self._bg_shapes_by_layout[layout_idx] = bg_shapes_xml
+                    logger.info(f"Extracted {len(bg_shapes_xml)} background shapes from layout [{layout_idx}]")
+
+        except Exception as e:
+            logger.warning(f"Failed to extract template backgrounds: {e}")
+
+    def _apply_background_shapes(self, slide, layout_idx: int):
+        """Apply cached background shapes to a new slide (insert at the back)."""
+        if layout_idx not in self._bg_shapes_by_layout:
+            return
+
+        try:
+            sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
+            bg_shapes = self._bg_shapes_by_layout[layout_idx]
+
+            # Insert background shapes at the beginning (behind content)
+            # Find the position after nvGrpSpPr and grpSpPr (required elements)
+            insert_pos = 0
+            for i, child in enumerate(sp_tree):
+                if child.tag in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
+                    insert_pos = i + 1
+
+            for shape_xml in bg_shapes:
+                sp_tree.insert(insert_pos, copy.deepcopy(shape_xml))
+                insert_pos += 1
+
+            logger.info(f"Applied {len(bg_shapes)} background shapes to slide (layout [{layout_idx}])")
+        except Exception as e:
+            logger.warning(f"Failed to apply background shapes: {e}")
 
     def _analyze_layouts(self):
         layout_map = {}
@@ -127,7 +213,16 @@ class PptxGenerator:
             idx = self._layout_map["title_content"]
 
         layouts = self._prs.slide_layouts
-        return layouts[idx] if idx < len(layouts) else layouts[0]
+        layout = layouts[idx] if idx < len(layouts) else layouts[0]
+        return layout, idx
+
+    def _create_slide(self, content: SlideContent):
+        """Create a new slide with layout and apply template background shapes."""
+        layout, layout_idx = self._get_smart_layout(content)
+        slide = self._prs.slides.add_slide(layout)
+        # Apply background decorations from original template
+        self._apply_background_shapes(slide, layout_idx)
+        return slide
 
     def generate(self) -> bytes:
         logger.info(f"PptxGenerator v2.1 (with speaker notes) - generating {len(self._plan.slides)} slides")
@@ -293,7 +388,7 @@ class PptxGenerator:
 
     def _add_title_slide(self, content: SlideContent):
         """Cover page — title centered, avoid bottom area."""
-        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
+        slide = self._create_slide(content)
         if slide.shapes.title:
             slide.shapes.title.text = content.title
         else:
@@ -306,7 +401,7 @@ class PptxGenerator:
 
     def _add_chapter_divider(self, content: SlideContent):
         """Section divider — centered title on section layout."""
-        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
+        slide = self._create_slide(content)
         if slide.shapes.title:
             slide.shapes.title.text = content.title
         else:
@@ -316,7 +411,7 @@ class PptxGenerator:
 
     def _add_content_with_chart_slide(self, content: SlideContent):
         """Left: bullet points, Right: chart. Both within safe zone."""
-        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
+        slide = self._create_slide(content)
         self._set_slide_title(slide, content.title)
 
         # Left: bullets (within safe zone)
@@ -336,7 +431,7 @@ class PptxGenerator:
 
     def _add_full_chart_slide(self, content: SlideContent):
         """Full-width chart within safe content zone."""
-        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
+        slide = self._create_slide(content)
         self._set_slide_title(slide, content.title)
 
         # Chart: full width but within safe vertical zone
@@ -355,7 +450,7 @@ class PptxGenerator:
 
     def _add_two_column_slide(self, content: SlideContent):
         """Two-column: bullets left, chart/table right."""
-        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
+        slide = self._create_slide(content)
         self._set_slide_title(slide, content.title)
 
         # Left column
@@ -379,7 +474,7 @@ class PptxGenerator:
 
     def _add_content_only_slide(self, content: SlideContent):
         """Text-only slide within safe zone."""
-        slide = self._prs.slides.add_slide(self._get_smart_layout(content))
+        slide = self._create_slide(content)
         self._set_slide_title(slide, content.title)
 
         # Bullets in safe zone
