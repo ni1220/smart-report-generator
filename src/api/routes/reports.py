@@ -80,15 +80,23 @@ async def create_report(
 
     logger.info(f"Creating report task {task_id} for user {user.get('sub')}")
 
+    # Auto-add logged-in user's email as recipient if they provided recipients
+    user_email = user.get("email", "")
+    recipients = list(request.recipients)  # copy
+    if user_email and user_email not in recipients:
+        recipients.append(user_email)
+        logger.info(f"Auto-added user email as recipient: {user_email}")
+
     # Prepare Step Functions input
     sf_input = {
         "task_id": task_id,
         "data_source_key": request.data_source,
         "data_source_keys": request.data_sources if request.data_sources else [request.data_source],
         "template_name": request.template,
-        "recipients": request.recipients,
+        "recipients": recipients,
         "options": request.options.model_dump(),
         "user_id": user.get("sub", "anonymous"),
+        "user_email": user_email,
         "retryCount": 0,
     }
 
