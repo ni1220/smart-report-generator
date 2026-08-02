@@ -247,7 +247,7 @@ class PptxGenerator:
         if content.bullet_points:
             bullets = "\n".join(f"• {bp}" for bp in content.bullet_points)
             self._add_text_box(slide, bullets,
-                               Inches(0.5), Inches(1.6), Inches(5.5), Inches(4.5), Pt(11))
+                               Inches(0.5), Inches(1.6), Inches(5.5), Inches(4.5), Pt(20))
 
         # Chart (right side)
         if content.chart:
@@ -282,7 +282,7 @@ class PptxGenerator:
         if content.bullet_points:
             bullets = "\n".join(f"• {bp}" for bp in content.bullet_points)
             self._add_text_box(slide, bullets,
-                               Inches(0.5), Inches(1.6), Inches(6.0), Inches(4.5), Pt(11))
+                               Inches(0.5), Inches(1.6), Inches(6.0), Inches(4.5), Pt(20))
 
         # Right column: chart or table
         if content.chart:
@@ -304,7 +304,7 @@ class PptxGenerator:
         if content.bullet_points:
             bullets = "\n\n".join(f"• {bp}" for bp in content.bullet_points)
             self._add_text_box(slide, bullets,
-                               Inches(0.8), Inches(1.6), Inches(11.5), Inches(4.5), Pt(13))
+                               Inches(0.8), Inches(1.6), Inches(11.5), Inches(4.5), Pt(20))
 
         # Insight driver
         if content.insight_driver:
