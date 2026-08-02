@@ -172,7 +172,12 @@ class PptxGenerator:
     def _add_slide(self, content: SlideContent):
         """Route slide creation based on content type."""
         layout_type = content.layout_type
-        if layout_type == "title_slide":
+        is_last = content.page_number == len(self._plan.slides)
+
+        # Force last page to use title/closing layout regardless of AI decision
+        if is_last:
+            self._add_closing_slide(content)
+        elif layout_type == "title_slide":
             if content.page_number == 1:
                 self._add_title_slide(content)
             else:
@@ -200,6 +205,25 @@ class PptxGenerator:
         if content.subtitle:
             self._add_text_box(slide, content.subtitle,
                                Inches(2), Inches(3.8), Inches(9), Inches(1), Pt(16))
+
+    def _add_closing_slide(self, content: SlideContent):
+        """Add closing/thank-you slide (last page) — uses cover layout."""
+        layouts = self._prs.slide_layouts
+        idx = self._layout_map["title_cover"]
+        slide_layout = layouts[idx] if idx < len(layouts) else layouts[0]
+        slide = self._prs.slides.add_slide(slide_layout)
+
+        # Use title or fallback
+        title = content.title if content.title else "感謝聆聽"
+        if slide.shapes.title:
+            slide.shapes.title.text = title
+        else:
+            self._add_text_box(slide, title,
+                               Inches(3), Inches(2.5), Inches(7), Inches(1.5), Pt(32), bold=True)
+
+        if content.subtitle:
+            self._add_text_box(slide, content.subtitle,
+                               Inches(3), Inches(4.2), Inches(7), Inches(1), Pt(14))
 
     def _add_chapter_divider(self, content: SlideContent):
         """Add chapter/section divider page."""
