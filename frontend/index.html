@@ -141,10 +141,6 @@
                 </div>
 
                 <div class="row">
-                    <div class="form-group">
-                        <label>收件人 Email（選填）</label>
-                        <input type="text" id="recipients" placeholder="judge@hackathon.tw">
-                    </div>
                     </div>
                 </div>
 
@@ -397,7 +393,7 @@
                 data_source: dataSources[0],  // Primary source (backward compatible)
                 data_sources: dataSources,     // All sources (new field)
                 template: templateName,
-                recipients: document.getElementById('recipients').value.split(',').map(s => s.trim()).filter(Boolean),
+                recipients: [],
                 options: {
                     language: 'zh-TW',
                     custom_prompt: document.getElementById('customPrompt').value.trim() || ''
