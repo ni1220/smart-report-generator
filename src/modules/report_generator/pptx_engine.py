@@ -164,30 +164,28 @@ class PptxGenerator:
             new_slide._element.remove(dst_cSld)
             new_slide._element.insert(0, copy.deepcopy(src_cSld))
             
+            # Ensure master background is inherited (remove any bg override)
+            self._ensure_master_bg_inherited(new_slide)
+            
             # Copy all relationships from source slide to destination
-            # This is critical for embedded images (logos, backgrounds)
             for rel in src_slide.part.rels.values():
-                # Skip the slide layout relationship (already set)
                 if rel.reltype == 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout':
                     continue
-                # Skip notes slide relationship
                 if 'notesSlide' in rel.reltype:
                     continue
-                    
-                # For embedded images/media, copy the target part
                 if rel.is_external:
                     new_slide.part.rels.get_or_add_ext_rel(rel.reltype, rel.target_ref)
                 else:
                     try:
                         new_slide.part.rels.get_or_add(rel.reltype, rel.target_part)
                     except Exception:
-                        pass  # Some rels may not be copyable
+                        pass
 
         except Exception as e:
             logger.warning(f"Failed to duplicate slide {src_idx}: {e}")
-            # Fallback: just add a blank slide with the layout
             layout = self._prs.slides[src_idx].slide_layout
-            self._prs.slides.add_slide(layout)
+            new_slide = self._prs.slides.add_slide(layout)
+            self._ensure_master_bg_inherited(new_slide)
 
     def _analyze_layouts(self):
         layout_map = {}
@@ -264,15 +262,42 @@ class PptxGenerator:
                 slide = self._prs.slides[slide_idx]
                 # Clear existing text content from placeholders (keep decorative shapes)
                 self._clear_slide_text(slide)
+                # Ensure slide inherits master background
+                self._ensure_master_bg_inherited(slide)
                 return slide
             else:
                 # Shouldn't happen, but fallback to adding a new slide
                 layout = self._prs.slide_layouts[0]
-                return self._prs.slides.add_slide(layout)
+                slide = self._prs.slides.add_slide(layout)
+                self._ensure_master_bg_inherited(slide)
+                return slide
         else:
             # Blank mode: create new slide from layout
             layout, _ = self._get_smart_layout(content)
             return self._prs.slides.add_slide(layout)
+
+    def _ensure_master_bg_inherited(self, slide):
+        """
+        Ensure the slide inherits background from the slide master.
+        
+        By default, python-pptx may add a <p:bg> element that overrides the master.
+        We remove any slide-level background so the master's background shows through.
+        Also ensure the layout doesn't block master background inheritance.
+        """
+        # Remove slide-level background override (if any)
+        cSld = slide._element.find(qn('p:cSld'))
+        if cSld is not None:
+            bg = cSld.find(qn('p:bg'))
+            if bg is not None:
+                cSld.remove(bg)
+        
+        # Ensure the layout allows master background to show
+        # Check if layout has showMasterSp="0" which would hide master shapes
+        layout_elem = slide.slide_layout._element
+        cSld_layout = layout_elem.find(qn('p:cSld'))
+        if cSld_layout is not None:
+            # showMasterBg is inherited by default (True), don't need to change
+            pass
 
     def _clear_slide_text(self, slide):
         """Clear text from placeholders on a template slide, keeping background shapes."""
