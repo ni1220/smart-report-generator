@@ -198,17 +198,8 @@
         let currentTaskId = '';
         let pollInterval = null;
         let uploadedDataKeys = [];  // Support multiple Excel files
-        let uploadedTemplateKey = localStorage.getItem('uploadedTemplateKey') || '';
+        let uploadedTemplateKey = '';
         let outputUrls = {};
-
-        // Restore template display if previously uploaded
-        if (uploadedTemplateKey) {
-            const nameEl = document.getElementById('templateFileName');
-            if (nameEl) {
-                nameEl.textContent = `已儲存模板: ${uploadedTemplateKey.split('/').pop()} ✓`;
-                nameEl.style.color = '#2d5a87';
-            }
-        }
 
         // === Login ===
         async function login() {
@@ -344,7 +335,6 @@
             try {
                 const s3Key = await uploadSingleFile(file, 'template');
                 uploadedTemplateKey = s3Key;
-                localStorage.setItem('uploadedTemplateKey', s3Key);
                 nameEl.textContent = `${file.name} ✓ 上傳成功`;
                 nameEl.style.color = '#2d5a87';
                 document.getElementById('templateUploadZone').classList.add('has-file');
