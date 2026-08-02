@@ -72,44 +72,49 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         message_id = None
 
         if recipients:
-            # Download files for attachment
-            pptx_bytes = download_file(pptx_key)
-            xlsx_bytes = download_file(xlsx_key)
+            # Try to send email, but don't fail the whole pipeline if SES is not configured
+            try:
+                # Download files for attachment
+                pptx_bytes = download_file(pptx_key)
+                xlsx_bytes = download_file(xlsx_key)
 
-            # Build email
-            html_body = build_report_email_html(
-                executive_summary=plan.executive_summary,
-                slide_count=len(plan.slides),
-                quality_passed=quality.get("passed", False),
-                download_links={
-                    "簡報下載 (PPTX)": pptx_url,
-                    "數據下載 (Excel)": xlsx_url,
-                },
-            )
-
-            # Send via SES
-            ses = SesClient()
-            result = ses.send_report_email(
-                recipients=recipients,
-                subject=f"[智匯簡報] 信用卡業務分析報告 — {plan.theme}",
-                html_body=html_body,
-                attachments=[
-                    {
-                        "filename": "信用卡業務分析報告.pptx",
-                        "content_bytes": pptx_bytes,
-                        "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                # Build email
+                html_body = build_report_email_html(
+                    executive_summary=plan.executive_summary,
+                    slide_count=len(plan.slides),
+                    quality_passed=quality.get("passed", False),
+                    download_links={
+                        "簡報下載 (PPTX)": pptx_url,
+                        "數據下載 (Excel)": xlsx_url,
                     },
-                    {
-                        "filename": "信用卡業務數據.xlsx",
-                        "content_bytes": xlsx_bytes,
-                        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    },
-                ],
-            )
+                )
 
-            email_sent = True
-            message_id = result["message_id"]
-            logger.info(f"[{task_id}] Email sent: {message_id}")
+                # Send via SES
+                ses = SesClient()
+                result = ses.send_report_email(
+                    recipients=recipients,
+                    subject=f"[智匯簡報] 數據分析報告 — {plan.theme}",
+                    html_body=html_body,
+                    attachments=[
+                        {
+                            "filename": "數據分析報告.pptx",
+                            "content_bytes": pptx_bytes,
+                            "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        },
+                        {
+                            "filename": "數據分析資料.xlsx",
+                            "content_bytes": xlsx_bytes,
+                            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        },
+                    ],
+                )
+
+                email_sent = True
+                message_id = result["message_id"]
+                logger.info(f"[{task_id}] Email sent: {message_id}")
+            except Exception as email_err:
+                logger.warning(f"[{task_id}] Email sending failed (non-fatal): {email_err}")
+                email_sent = False
 
         # Notify completion
         notify_progress(
