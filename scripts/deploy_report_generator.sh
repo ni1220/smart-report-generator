@@ -64,7 +64,13 @@ fi
 # 2. Install dependencies
 echo ""
 echo "[2/5] 安裝 Python 依賴套件..."
-pip install python-pptx==1.0.2 openpyxl==3.1.5 pydantic==2.10.3 lxml -t package/ -q
+pip install \
+  --platform manylinux2014_x86_64 \
+  --target package/ \
+  --implementation cp \
+  --python-version 3.12 \
+  --only-binary=:all: \
+  python-pptx==1.0.2 openpyxl==3.1.5 pydantic==2.10.3 lxml -q
 echo "  ✓ 依賴套件安裝完成"
 
 # 3. Create ZIP
