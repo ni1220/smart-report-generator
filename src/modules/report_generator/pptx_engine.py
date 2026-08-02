@@ -483,7 +483,6 @@ class PptxGenerator:
         if content.subtitle:
             self._add_text_box(slide, content.subtitle,
                                Inches(2), Inches(4.2), Inches(9), Inches(0.8), Pt(16))
-        self._add_speaker_notes(slide, content)
 
     def _add_chapter_divider(self, content: SlideContent):
         """Section divider — centered title on section layout."""
@@ -493,7 +492,6 @@ class PptxGenerator:
         else:
             self._add_text_box(slide, content.title,
                                Inches(3), Inches(3), Inches(7), Inches(1.5), Pt(28), bold=True)
-        self._add_speaker_notes(slide, content)
 
     def _add_content_with_chart_slide(self, content: SlideContent):
         """Left: bullet points, Right: chart. Both within safe zone."""
@@ -513,8 +511,6 @@ class PptxGenerator:
                                    Inches(6.0), CONTENT_TOP,
                                    Inches(6.7), CONTENT_HEIGHT)
 
-        self._add_speaker_notes(slide, content)
-
     def _add_full_chart_slide(self, content: SlideContent):
         """Full-width chart within safe content zone."""
         slide = self._create_slide(content)
@@ -531,8 +527,6 @@ class PptxGenerator:
             self._add_text_box(slide, f"◆ {content.insight_driver}",
                                LEFT_MARGIN, Inches(5.4),
                                FULL_CONTENT_WIDTH, Inches(0.4), Pt(9), italic=True)
-
-        self._add_speaker_notes(slide, content)
 
     def _add_two_column_slide(self, content: SlideContent):
         """Two-column: bullets left, chart/table right."""
@@ -556,8 +550,6 @@ class PptxGenerator:
                            left=Inches(6.8), top=CONTENT_TOP,
                            width=Inches(5.9), height=CONTENT_HEIGHT)
 
-        self._add_speaker_notes(slide, content)
-
     def _add_content_only_slide(self, content: SlideContent):
         """Text-only slide within safe zone."""
         slide = self._create_slide(content)
@@ -575,8 +567,6 @@ class PptxGenerator:
             self._add_text_box(slide, f"◆ 驅動因素：{content.insight_driver}",
                                LEFT_MARGIN, Inches(5.2),
                                FULL_CONTENT_WIDTH, Inches(0.5), Pt(10), italic=True)
-
-        self._add_speaker_notes(slide, content)
 
     # === Chart & Table ===
 
