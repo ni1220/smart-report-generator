@@ -290,26 +290,55 @@ class PptxGenerator:
     # === Chart & Table Helpers ===
 
     def _add_native_chart(self, slide, chart_spec: ChartSpec, left, top, width, height):
-        """Add a native editable chart to the slide."""
+        """Add a native editable chart with optimized readability."""
         if not chart_spec.categories or not chart_spec.data_series:
             return
         try:
             chart_type = PPTX_CHART_TYPE_MAP.get(chart_spec.chart_type, XL_CHART_TYPE.COLUMN_CLUSTERED)
             chart_data = CategoryChartData()
-            chart_data.categories = chart_spec.categories
+
+            # Limit categories for readability (max 12)
+            categories = chart_spec.categories[:12]
+            chart_data.categories = categories
+
             for series in chart_spec.data_series:
-                values = series.values[:len(chart_spec.categories)]
-                while len(values) < len(chart_spec.categories):
+                values = series.values[:len(categories)]
+                while len(values) < len(categories):
                     values.append(0)
                 chart_data.add_series(series.name, tuple(values))
 
             chart_frame = slide.shapes.add_chart(chart_type, left, top, width, height, chart_data)
             chart = chart_frame.chart
-            chart.has_legend = len(chart_spec.data_series) > 1
+
+            # Legend: always show for pie charts and multi-series
+            is_pie = chart_spec.chart_type == "pie"
+            if is_pie or len(chart_spec.data_series) > 1:
+                chart.has_legend = True
+                from pptx.enum.chart import XL_LEGEND_POSITION
+                chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+                chart.legend.include_in_layout = False
+                chart.legend.font.size = Pt(8)
+            else:
+                chart.has_legend = False
+
+            # Chart title
             if chart_spec.title:
                 chart.has_title = True
-                chart.chart_title.text_frame.text = chart_spec.title
+                chart.chart_title.text_frame.text = chart_spec.title[:50]
                 chart.chart_title.text_frame.paragraphs[0].font.size = Pt(10)
+                chart.chart_title.text_frame.paragraphs[0].font.bold = True
+
+            # Axis formatting (not for pie charts)
+            if not is_pie:
+                try:
+                    if hasattr(chart, 'category_axis'):
+                        chart.category_axis.tick_labels.font.size = Pt(8)
+                    if hasattr(chart, 'value_axis'):
+                        chart.value_axis.tick_labels.font.size = Pt(8)
+                        chart.value_axis.has_major_gridlines = True
+                except Exception:
+                    pass
+
             logger.info(f"Added native {chart_spec.chart_type} chart: '{chart_spec.title}'")
         except Exception as e:
             logger.warning(f"Failed to add chart '{chart_spec.title}': {e}")
@@ -343,15 +372,24 @@ class PptxGenerator:
 
     def _add_text_box(self, slide, text, left, top, width, height,
                       font_size=Pt(12), bold=False, italic=False):
-        """Add a formatted text box."""
+        """Add a formatted text box with proper multi-line support."""
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame
         tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = text
-        p.font.size = font_size
-        p.font.bold = bold
-        p.font.italic = italic
+
+        # Split text into paragraphs for proper formatting
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if i == 0:
+                p = tf.paragraphs[0]
+            else:
+                p = tf.add_paragraph()
+            p.text = line
+            p.font.size = font_size
+            p.font.bold = bold
+            p.font.italic = italic
+            p.font.name = "Microsoft JhengHei"  # 微軟正黑體
+            p.space_after = Pt(4)
 
     def _get_layout(self, index: int):
         """Get slide layout by index (legacy fallback)."""
