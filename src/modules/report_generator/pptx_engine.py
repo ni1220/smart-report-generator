@@ -52,21 +52,22 @@ class PptxGenerator:
 
     def __init__(self, plan: PresentationPlan, template_bytes: bytes | None = None):
         self._plan = plan
-        self._bg_shapes_by_layout = {}  # Cache background shapes from template
+        self._template_slides_xml = []  # Store original template slide XML for reuse
 
         if template_bytes:
             self._prs = Presentation(BytesIO(template_bytes))
+            self._slide_width = self._prs.slide_width
+            self._slide_height = self._prs.slide_height
 
-            # Before clearing slides, extract background shapes from each slide
-            # (template backgrounds are often stored as shapes on slides, not in layouts)
-            self._extract_template_backgrounds()
+            # Store template slides info before clearing
+            self._catalog_template_slides()
 
-            # Remove existing slides, keep layouts
+            # Remove existing slides but keep layouts
             while len(self._prs.slides) > 0:
                 rId = self._prs.slides._sldIdLst[0].rId
                 self._prs.part.drop_rel(rId)
                 del self._prs.slides._sldIdLst[0]
-            logger.info("Template loaded, slides cleared")
+            logger.info(f"Template loaded: {len(self._template_slides_xml)} slides cataloged, slides cleared")
         else:
             self._prs = Presentation()
             self._prs.slide_width = Inches(13.333)
@@ -75,84 +76,124 @@ class PptxGenerator:
         self._layout_map = self._analyze_layouts()
         logger.info(f"Layout mapping: {self._layout_map}")
 
-    def _extract_template_backgrounds(self):
+    def _catalog_template_slides(self):
         """
-        Extract non-placeholder background shapes from template slides.
-        These are typically decorative elements (gradients, logos, colored bars)
-        that exist on the slide itself rather than in the layout/master.
+        Analyze template slides and categorize them by visual type.
+        Store the XML of non-placeholder shapes (background decorations) from each.
+        
+        Strategy: For each unique layout used in the template, extract the decorative
+        shapes (images, filled rectangles, logos, gradients) that form the background.
+        These will be re-applied to new slides.
         """
-        try:
-            for slide in self._prs.slides:
-                # Identify which layout this slide uses
-                layout_idx = None
-                for idx, layout in enumerate(self._prs.slide_layouts):
-                    if slide.slide_layout == layout:
-                        layout_idx = idx
-                        break
+        seen_layouts = set()
+        
+        for slide_idx, slide in enumerate(self._prs.slides):
+            # Find which layout index this slide uses
+            layout_idx = None
+            for idx, layout in enumerate(self._prs.slide_layouts):
+                if slide.slide_layout == layout:
+                    layout_idx = idx
+                    break
+            
+            if layout_idx is None:
+                layout_idx = slide_idx  # fallback: use slide position
 
-                if layout_idx is None:
+            # Extract ALL shapes from this slide (both decorative and placeholder)
+            sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
+            
+            # Separate decorative shapes from placeholders
+            decorative_shapes = []
+            for shape_elem in list(sp_tree):
+                tag = shape_elem.tag
+                if tag in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
                     continue
+                
+                is_placeholder = False
+                # Check p:sp placeholders
+                nvSpPr = shape_elem.find(qn('p:nvSpPr'))
+                if nvSpPr is not None:
+                    nvPr = nvSpPr.find(qn('p:nvPr'))
+                    if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
+                        is_placeholder = True
+                
+                # Check p:pic (pictures are usually decorative backgrounds)
+                nvPicPr = shape_elem.find(qn('p:nvPicPr'))
+                if nvPicPr is not None:
+                    nvPr = nvPicPr.find(qn('p:nvPr'))
+                    if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
+                        is_placeholder = True
 
-                # Only store the first occurrence per layout
-                if layout_idx in self._bg_shapes_by_layout:
-                    continue
+                if not is_placeholder and tag in [qn('p:sp'), qn('p:pic'), qn('p:grpSp'), qn('p:cxnSp')]:
+                    decorative_shapes.append(copy.deepcopy(shape_elem))
 
-                # Extract non-placeholder shapes (decorative backgrounds)
-                bg_shapes_xml = []
-                sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
-                for shape_elem in sp_tree:
-                    tag = shape_elem.tag
-                    # Skip groupShape wrapper, placeholders, and notes
-                    if tag == qn('p:nvGrpSpPr') or tag == qn('p:grpSpPr'):
-                        continue
+            slide_info = {
+                'layout_idx': layout_idx,
+                'slide_idx': slide_idx,
+                'decorative_shapes': decorative_shapes,
+                'shape_count': len(decorative_shapes),
+            }
+            self._template_slides_xml.append(slide_info)
+            logger.info(f"  Template slide [{slide_idx}] layout={layout_idx}: {len(decorative_shapes)} decorative shapes")
 
-                    # Check if it's a placeholder (skip those)
-                    is_placeholder = False
-                    nvSpPr = shape_elem.find(qn('p:nvSpPr'))
-                    if nvSpPr is not None:
-                        nvPr = nvSpPr.find(qn('p:nvPr'))
-                        if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
-                            is_placeholder = True
+    def _get_best_template_bg(self, content: SlideContent) -> list:
+        """
+        AI-like selection: choose the best template slide background for this content.
+        
+        Logic:
+        - Cover/ending pages → use the first template slide (usually most decorated)
+        - Section dividers → use a slide with medium decoration
+        - Content pages with charts → use the cleanest (least decorated) slide
+        - Text-only pages → use moderate decoration
+        """
+        if not self._template_slides_xml:
+            return []
 
-                    nvCxnSpPr = shape_elem.find(qn('p:nvCxnSpPr'))
-                    if nvCxnSpPr is not None:
-                        nvPr = nvCxnSpPr.find(qn('p:nvPr'))
-                        if nvPr is not None and nvPr.find(qn('p:ph')) is not None:
-                            is_placeholder = True
+        is_first = content.page_number == 1
+        is_last = content.page_number == len(self._plan.slides)
+        has_chart = content.chart and content.chart.categories and content.chart.data_series
+        is_divider = content.layout_type == "title_slide" and not is_first
 
-                    if not is_placeholder and tag in [qn('p:sp'), qn('p:pic'), qn('p:grpSp'), qn('p:cxnSp')]:
-                        bg_shapes_xml.append(copy.deepcopy(shape_elem))
+        # Sort template slides by decoration density
+        sorted_slides = sorted(self._template_slides_xml, key=lambda s: s['shape_count'], reverse=True)
+        
+        if is_first or is_last:
+            # Cover/ending: use the most decorated template slide
+            chosen = sorted_slides[0]
+        elif is_divider:
+            # Divider: use moderately decorated
+            mid_idx = len(sorted_slides) // 2
+            chosen = sorted_slides[min(mid_idx, len(sorted_slides) - 1)]
+        elif has_chart:
+            # Charts need clean space: use the least decorated
+            chosen = sorted_slides[-1]
+        else:
+            # Content pages: use least decorated (more space for text)
+            chosen = sorted_slides[-1]
 
-                if bg_shapes_xml:
-                    self._bg_shapes_by_layout[layout_idx] = bg_shapes_xml
-                    logger.info(f"Extracted {len(bg_shapes_xml)} background shapes from layout [{layout_idx}]")
+        return chosen['decorative_shapes']
 
-        except Exception as e:
-            logger.warning(f"Failed to extract template backgrounds: {e}")
-
-    def _apply_background_shapes(self, slide, layout_idx: int):
-        """Apply cached background shapes to a new slide (insert at the back)."""
-        if layout_idx not in self._bg_shapes_by_layout:
+    def _apply_template_background(self, slide, content: SlideContent):
+        """Apply the best-matching template background to a new slide."""
+        bg_shapes = self._get_best_template_bg(content)
+        if not bg_shapes:
             return
 
         try:
             sp_tree = slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
-            bg_shapes = self._bg_shapes_by_layout[layout_idx]
 
-            # Insert background shapes at the beginning (behind content)
-            # Find the position after nvGrpSpPr and grpSpPr (required elements)
+            # Find insertion point (after nvGrpSpPr and grpSpPr)
             insert_pos = 0
             for i, child in enumerate(sp_tree):
                 if child.tag in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
                     insert_pos = i + 1
 
+            # Insert background shapes at the back (behind content)
             for shape_xml in bg_shapes:
                 sp_tree.insert(insert_pos, copy.deepcopy(shape_xml))
                 insert_pos += 1
 
-            logger.info(f"Applied {len(bg_shapes)} background shapes to slide (layout [{layout_idx}])")
         except Exception as e:
-            logger.warning(f"Failed to apply background shapes: {e}")
+            logger.warning(f"Failed to apply template background: {e}")
 
     def _analyze_layouts(self):
         layout_map = {}
@@ -220,8 +261,8 @@ class PptxGenerator:
         """Create a new slide with layout and apply template background shapes."""
         layout, layout_idx = self._get_smart_layout(content)
         slide = self._prs.slides.add_slide(layout)
-        # Apply background decorations from original template
-        self._apply_background_shapes(slide, layout_idx)
+        # Apply best-matching template background decorations
+        self._apply_template_background(slide, content)
         return slide
 
     def generate(self) -> bytes:
