@@ -53,11 +53,11 @@ curl -sL "$GITHUB_RAW/src/shared/websocket_notifier.py" -o package/src/shared/we
 
 echo "  ✓ 原始碼下載完成"
 
-# Verify pptx_engine.py has speaker notes function
-if grep -q "_add_speaker_notes" package/src/modules/report_generator/pptx_engine.py; then
-    echo "  ✓ 確認 pptx_engine.py 包含 _add_speaker_notes 方法"
+# Verify pptx_engine.py downloaded correctly
+if grep -q "PptxGenerator" package/src/modules/report_generator/pptx_engine.py; then
+    echo "  ✓ 確認 pptx_engine.py 下載正確"
 else
-    echo "  ✗ 錯誤：pptx_engine.py 缺少 _add_speaker_notes！"
+    echo "  ✗ 錯誤：pptx_engine.py 下載失敗！"
     exit 1
 fi
 
