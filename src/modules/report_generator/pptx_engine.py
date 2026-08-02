@@ -148,36 +148,40 @@ class PptxGenerator:
         return best_idx
 
     def _duplicate_slide(self, src_idx: int):
-        """Duplicate a slide (preserving all shapes, images, and relationships)."""
+        """Duplicate a slide preserving ALL relationships (images, media, etc.)."""
         try:
             src_slide = self._prs.slides[src_idx]
-            # Use the same layout as the source slide
             layout = src_slide.slide_layout
+            
+            # Create new slide with same layout
             new_slide = self._prs.slides.add_slide(layout)
             
-            # Copy all shapes from source to new slide
-            src_sp_tree = src_slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
-            dst_sp_tree = new_slide._element.find(qn('p:cSld')).find(qn('p:spTree'))
-            
-            # Remove default placeholder shapes from new slide
-            for child in list(dst_sp_tree):
-                if child.tag not in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
-                    dst_sp_tree.remove(child)
-            
-            # Copy shapes from source (including images via relationships)
-            for child in src_sp_tree:
-                if child.tag not in [qn('p:nvGrpSpPr'), qn('p:grpSpPr')]:
-                    dst_sp_tree.append(copy.deepcopy(child))
-            
-            # Copy background if exists
+            # Copy the entire cSld element (contains spTree with all shapes)
             src_cSld = src_slide._element.find(qn('p:cSld'))
             dst_cSld = new_slide._element.find(qn('p:cSld'))
-            src_bg = src_cSld.find(qn('p:bg'))
-            if src_bg is not None:
-                dst_bg = dst_cSld.find(qn('p:bg'))
-                if dst_bg is not None:
-                    dst_cSld.remove(dst_bg)
-                dst_cSld.insert(0, copy.deepcopy(src_bg))
+            
+            # Replace destination cSld content with source
+            new_slide._element.remove(dst_cSld)
+            new_slide._element.insert(0, copy.deepcopy(src_cSld))
+            
+            # Copy all relationships from source slide to destination
+            # This is critical for embedded images (logos, backgrounds)
+            for rel in src_slide.part.rels.values():
+                # Skip the slide layout relationship (already set)
+                if rel.reltype == 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout':
+                    continue
+                # Skip notes slide relationship
+                if 'notesSlide' in rel.reltype:
+                    continue
+                    
+                # For embedded images/media, copy the target part
+                if rel.is_external:
+                    new_slide.part.rels.get_or_add_ext_rel(rel.reltype, rel.target_ref)
+                else:
+                    try:
+                        new_slide.part.rels.get_or_add(rel.reltype, rel.target_part)
+                    except Exception:
+                        pass  # Some rels may not be copyable
 
         except Exception as e:
             logger.warning(f"Failed to duplicate slide {src_idx}: {e}")
